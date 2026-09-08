@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Account nog niet actief - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+  <div class="center-page">
+    <div class="auth-card">
+      <div class="brand-lockup">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+        <div class="name">SchoolRegie</div>
+      </div>
+      <div class="card">
+        <h1 style="font-size:1.15rem;margin-bottom:2px;">Account nog niet actief</h1>
+        <p style="margin-bottom:18px;">Je bent ingelogd, maar er is nog geen rol aan dit account gekoppeld. Neem contact op met je schoolbeheerder.</p>
+        <button class="btn btn-secondary btn-block" id="signout-btn">Uitloggen</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { signOut } from '/assets/supabase-client.js';
+    import { $ } from '/assets/ui.js';
+    $('#signout-btn').addEventListener('click', signOut);
+  </script>
+</body>
+</html>

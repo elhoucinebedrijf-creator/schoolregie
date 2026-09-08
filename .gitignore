@@ -1,0 +1,7 @@
+node_modules/
+scripts/node_modules/
+supabase/.temp/
+npm-debug.log*
+.DS_Store
+.vercel
+.env*

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link active">Overzicht</a>
+    <div id="sidebar-modules"></div>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Overzicht</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3 id="welkom-titel">Welkom</h3></div>
+        <p class="hint" id="school-info"></p>
+      </div>
+
+      <div class="stat-grid" id="stats"></div>
+
+      <div class="card" style="margin-top:16px;">
+        <div class="card-row"><h3>Modules voor jouw rol</h3></div>
+        <p class="hint" style="margin-bottom:14px;">SchoolRegie wordt module voor module gebouwd. Hieronder zie je welke modules voor jouw rol relevant zijn en of ze al beschikbaar zijn.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Module</th><th>Status</th></tr></thead>
+          <tbody id="modules-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, renderTopbar, escapeHtml } from '/assets/ui.js';
+
+  const ctx = await requireUser();
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $('#welkom-titel').textContent = `Welkom, ${profile.full_name}`;
+
+  // Modules per rol, met bouwstatus - matcht de fase-indeling uit het
+  // bouwplan (Fase 1: gemiste toetsen; Fase 2: verzuim/maatwerk; enz.).
+  const ALLE_MODULES = {
+    'Gemiste toetsen & inhaal': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'], status: 'gepland' },
+    'AI-inhaaltoets & goedkeuring': { rollen: ['administrator', 'vakdocent'], status: 'gepland' },
+    'Verzuim': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'verzuimcoordinator', 'ouder', 'leerling'], status: 'gepland' },
+    'Maatwerk': { rollen: ['administrator', 'mentor', 'vakdocent', 'teamleider', 'leerling', 'ouder'], status: 'gepland' },
+    'Signalen & escalatie': { rollen: ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator'], status: 'gepland' },
+    'Oudergesprekken': { rollen: ['administrator', 'mentor', 'ouder'], status: 'gepland' },
+    'OPP & zorg': { rollen: ['administrator', 'zorgcoordinator', 'mentor'], status: 'gepland' },
+    'Zorgoverleg / MDO': { rollen: ['administrator', 'zorgcoordinator', 'teamleider'], status: 'gepland' },
+    'Toetsbank': { rollen: ['administrator', 'vakdocent', 'surveillant'], status: 'gepland' },
+    'Surveillance': { rollen: ['administrator', 'surveillant'], status: 'gepland' },
+    'Rooster & capaciteit': { rollen: ['administrator', 'teamleider'], status: 'gepland' },
+    'Management cockpit': { rollen: ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'], status: 'gepland' },
+    'Import & koppelingen': { rollen: ['administrator'], status: 'gepland' },
+  };
+
+  const eigenModules = Object.entries(ALLE_MODULES).filter(([, m]) => m.rollen.includes(profile.role));
+  $('#sidebar-modules').innerHTML = eigenModules
+    .map(([naam]) => `<a class="nav-link" style="opacity:0.55;cursor:default;" title="Nog niet gebouwd">${escapeHtml(naam)}</a>`)
+    .join('');
+  $('#modules-body').innerHTML = eigenModules.length
+    ? eigenModules.map(([naam, m]) => `<tr><td>${escapeHtml(naam)}</td><td><span class="badge badge--neutral">${escapeHtml(m.status)}</span></td></tr>`).join('')
+    : `<tr><td colspan="2" style="color:var(--text-muted);">Geen modules gekoppeld aan deze rol.</td></tr>`;
+
+  // Schoolinfo + eenvoudige teller als levend bewijs dat RLS/multi-tenancy werkt.
+  const { data: school } = await supabase.from('schools').select('name, brin').maybeSingle();
+  $('#school-info').textContent = school ? `${school.name}${school.brin ? ` (BRIN ${school.brin})` : ''}` : 'Geen school gekoppeld.';
+
+  const { data: students } = await supabase.from('students').select('student_id');
+  const { data: staffProfiles } = await supabase.from('profiles').select('id');
+  $('#stats').innerHTML = `
+    <div class="stat-card"><div class="value">${students?.length || 0}</div><div class="label">Leerlingen</div></div>
+    <div class="stat-card"><div class="value">${staffProfiles?.length || 0}</div><div class="label">Accounts</div></div>
+  `;
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nieuw wachtwoord - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+  <div class="center-page">
+    <div class="auth-card">
+      <div class="brand-lockup">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+        <div class="name">SchoolRegie</div>
+      </div>
+      <div class="card">
+        <h1 style="font-size:1.15rem;margin-bottom:2px;">Nieuw wachtwoord instellen</h1>
+        <p style="margin-bottom:18px;">Kies een nieuw wachtwoord voor je account.</p>
+        <form id="reset-form">
+          <div class="field">
+            <label for="password">Nieuw wachtwoord</label>
+            <input id="password" type="password" minlength="8" autocomplete="new-password" required />
+            <p class="hint">Minimaal 8 tekens.</p>
+          </div>
+          <button class="btn btn-primary btn-block" type="submit" id="submit-btn">Wachtwoord opslaan</button>
+          <p id="error" class="error-text" hidden></p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase, getSessionProfile, ROLE_HOME } from '/assets/supabase-client.js';
+    import { $, setLoading, friendlyError } from '/assets/ui.js';
+
+    $('#reset-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#submit-btn');
+      $('#error').hidden = true;
+      setLoading(btn, true, 'Bezig…');
+      const { error } = await supabase.auth.updateUser({ password: $('#password').value });
+      if (error) {
+        $('#error').hidden = false;
+        $('#error').textContent = friendlyError(error);
+        setLoading(btn, false);
+        return;
+      }
+      const { profile } = await getSessionProfile();
+      window.location.href = (profile && ROLE_HOME[profile.role]) || '/login.html';
+    });
+  </script>
+</body>
+</html>

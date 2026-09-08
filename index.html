@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SchoolRegie</title>
+<script src="/assets/config.js"></script>
+</head>
+<body>
+  <script type="module">
+    import { getSessionProfile, ROLE_HOME } from '/assets/supabase-client.js';
+    getSessionProfile().then(({ session, profile }) => {
+      window.location.href = (session && profile) ? (ROLE_HOME[profile.role] || '/login.html') : '/login.html';
+    });
+  </script>
+</body>
+</html>

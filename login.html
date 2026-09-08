@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inloggen - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+  <div class="split-screen">
+    <aside class="split-visual">
+      <div class="mark-lg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M8 14l2 2 4-4"/></svg></div>
+      <span class="eyebrow">SchoolRegie</span>
+      <h2>Leerlingprocessen die zichzelf blijven opvolgen tot ze écht zijn afgerond.</h2>
+      <p class="lede">Log hiernaast in met het account dat je van je school hebt gekregen.</p>
+    </aside>
+    <div class="split-form">
+      <div class="auth-card">
+        <div class="brand-lockup">
+          <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M8 14l2 2 4-4"/></svg></div>
+          <div class="name">SchoolRegie</div>
+        </div>
+        <div class="card">
+          <h1 style="font-size:1.15rem;margin-bottom:2px;">Inloggen</h1>
+          <p style="margin-bottom:18px;">Log in met je e-mailadres en wachtwoord.</p>
+          <form id="login-form">
+            <div class="field">
+              <label for="email">E-mailadres</label>
+              <input id="email" type="email" autocomplete="username" required />
+            </div>
+            <div class="field">
+              <label for="password">Wachtwoord</label>
+              <input id="password" type="password" autocomplete="current-password" required />
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" id="submit-btn">Inloggen</button>
+            <p id="error" class="error-text" hidden></p>
+          </form>
+          <p style="margin-top:14px;"><a href="/wachtwoord-vergeten.html">Wachtwoord vergeten?</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase, getSessionProfile, ROLE_HOME } from '/assets/supabase-client.js';
+    import { $, setLoading, friendlyError } from '/assets/ui.js';
+
+    getSessionProfile().then(({ session, profile }) => {
+      if (session && profile) window.location.href = ROLE_HOME[profile.role] || '/login.html';
+    });
+
+    $('#login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#submit-btn');
+      $('#error').hidden = true;
+      setLoading(btn, true, 'Bezig…');
+      const email = $('#email').value.trim();
+      const password = $('#password').value;
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        $('#error').hidden = false;
+        $('#error').textContent = friendlyError(error);
+        setLoading(btn, false);
+        return;
+      }
+      const { profile } = await getSessionProfile();
+      if (!profile) {
+        window.location.href = '/account-nog-niet-actief.html';
+        return;
+      }
+      window.location.href = ROLE_HOME[profile.role] || '/login.html';
+    });
+  </script>
+</body>
+</html>
