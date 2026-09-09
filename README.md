@@ -13,7 +13,7 @@ context en fase-indeling staan in
 **Supabase-project:** `kuxagvhesctephrgfpfo`
 **n8n:** `n8n.elhoucineautomation.nl` (Hostinger Docker Manager) - alle
 15 workflows actief
-**GitHub:** nog niet gepusht
+**GitHub:** https://github.com/elhoucinebedrijf-creator/schoolregie
 
 ## Status
 
