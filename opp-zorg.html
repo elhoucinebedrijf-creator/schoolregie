@@ -174,19 +174,51 @@
         setLoading(btn, false);
       }
     }));
-    $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', async () => {
-      const { data: opp } = await supabase.from('opp_plans').select('ai_summary, ai_confidence').eq('opp_id', btn.dataset.bekijk).maybeSingle();
-      $('#samenvatting-body').innerHTML = `
-        <p class="hint">Confidence: ${opp?.ai_confidence != null ? Math.round(opp.ai_confidence * 100) + '%' : 'onbekend'}</p>
-        <div class="field"><textarea rows="14" readonly>${escapeHtml(opp?.ai_summary || '')}</textarea></div>
-      `;
-      openModal('#samenvatting-modal');
-    }));
+    $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', () => bekijkOpenen(btn.dataset.bekijk)));
     $$('[data-volgende]').forEach((btn) => btn.addEventListener('click', async () => {
       const { error } = await supabase.from('opp_plans').update({ status: btn.dataset.status }).eq('opp_id', btn.dataset.volgende);
       if (error) { toast(friendlyError(error), 'critical'); return; }
       await laadOpp();
     }));
+  }
+
+  async function bekijkOpenen(oppId) {
+    const [{ data: opp }, { data: goals }, { data: actions }] = await Promise.all([
+      supabase.from('opp_plans').select('ai_summary, ai_confidence').eq('opp_id', oppId).maybeSingle(),
+      supabase.from('opp_goals').select('goal_id, description, target_date, status').eq('opp_id', oppId).order('created_at', { ascending: true }),
+      supabase.from('opp_actions').select('action_id:opp_action_id, description, due_date, status, profiles(full_name)').eq('opp_id', oppId).order('created_at', { ascending: true }),
+    ]);
+
+    const doelenHtml = (goals || []).length
+      ? goals.map((g) => `<div class="card" style="margin-bottom:8px;">
+          <div class="card-row"><strong>${escapeHtml(g.description)}</strong>${badge(g.status)}</div>
+          <p class="hint">Streefdatum: ${formatDate(g.target_date)}</p>
+          ${g.status === 'nieuw' ? `<button class="btn btn-sm btn-primary" data-goal-goedkeuren="${g.goal_id}">Goedkeuren</button> <button class="btn btn-sm btn-ghost" data-goal-afwijzen="${g.goal_id}">Afwijzen</button>` : ''}
+        </div>`).join('')
+      : `<p class="hint">Geen AI-doelen voorgesteld.</p>`;
+
+    const actiesHtml = (actions || []).length
+      ? actions.map((a) => `<div class="card" style="margin-bottom:8px;">
+          <div class="card-row"><strong>${escapeHtml(a.description)}</strong>${badge(a.status)}</div>
+          <p class="hint">Eigenaar: ${escapeHtml(a.profiles?.full_name || 'nog niet toegewezen')} - deadline: ${formatDate(a.due_date)}</p>
+          ${a.status === 'nieuw' ? `<button class="btn btn-sm btn-primary" data-action-goedkeuren="${a.action_id}">Goedkeuren</button> <button class="btn btn-sm btn-ghost" data-action-afwijzen="${a.action_id}">Afwijzen</button>` : ''}
+        </div>`).join('')
+      : `<p class="hint">Geen AI-acties voorgesteld.</p>`;
+
+    $('#samenvatting-body').innerHTML = `
+      <p class="hint">Confidence: ${opp?.ai_confidence != null ? Math.round(opp.ai_confidence * 100) + '%' : 'onbekend'}</p>
+      <div class="field"><textarea rows="10" readonly>${escapeHtml(opp?.ai_summary || '')}</textarea></div>
+      <h4 style="margin-top:16px;">Voorgestelde doelen</h4>
+      ${doelenHtml}
+      <h4 style="margin-top:16px;">Voorgestelde acties</h4>
+      ${actiesHtml}
+    `;
+    openModal('#samenvatting-modal');
+
+    $$('[data-goal-goedkeuren]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_goals').update({ status: 'goedgekeurd' }).eq('goal_id', b.dataset.goalGoedkeuren); await bekijkOpenen(oppId); }));
+    $$('[data-goal-afwijzen]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_goals').update({ status: 'geannuleerd' }).eq('goal_id', b.dataset.goalAfwijzen); await bekijkOpenen(oppId); }));
+    $$('[data-action-goedkeuren]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_actions').update({ status: 'goedgekeurd' }).eq('opp_action_id', b.dataset.actionGoedkeuren); await bekijkOpenen(oppId); }));
+    $$('[data-action-afwijzen]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_actions').update({ status: 'geannuleerd' }).eq('opp_action_id', b.dataset.actionAfwijzen); await bekijkOpenen(oppId); }));
   }
 
   async function laadMdo() {

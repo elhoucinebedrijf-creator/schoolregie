@@ -39,18 +39,12 @@ async function handleMissedTests(req: Request, admin: Admin) {
     .single();
   if (makeupError) throw makeupError;
 
+  const staffBody = `${student.full_name} heeft een toets gemist (reden: ${reason || 'onbekend'}). Er is automatisch een inhaalactie aangemaakt.`;
   const ontvangers = [...new Set([teacherId, mentorId || student.mentor_profile_id].filter(Boolean))];
-  for (const _ontvangerId of ontvangers) {
-    await admin.from('communications').insert({
-      school_id: student.school_id,
-      student_id: studentId,
-      channel: 'app',
-      template_key: 'missed_test_notice',
-      subject: `Gemiste toets: ${student.full_name}`,
-      body: `${student.full_name} heeft een toets gemist (reden: ${reason || 'onbekend'}). Er is automatisch een inhaalactie aangemaakt (makeup_test ${makeupTest.makeup_test_id}).`,
-      status: 'nieuw',
-    });
+  for (const ontvangerId of ontvangers) {
+    await notifyStaff(admin, { schoolId: student.school_id, profileId: ontvangerId as string, studentId, subject: `Gemiste toets: ${student.full_name}`, body: staffBody, templateKey: 'missed_test_notice' });
   }
+  await notifyGuardiansAndStudent(admin, { schoolId: student.school_id, studentId, subject: `Gemiste toets: ${student.full_name}`, body: `${student.full_name} heeft een toets gemist. Zodra er een inhaalmoment is, hoor je dat automatisch.`, templateKey: 'missed_test_notice_family' });
 
   await admin.from('audit_logs').insert({
     school_id: student.school_id,
@@ -168,6 +162,13 @@ async function handleTasksTeacherReview(req: Request, admin: Admin) {
     .single();
   if (taskError) throw taskError;
 
+  await notifyStaff(admin, {
+    schoolId: makeup.school_id, profileId: teacherId, studentId,
+    subject: `AI-inhaaltoets klaar voor beoordeling: ${studentName}`,
+    body: `Er staat een AI-conceptinhaaltoets + antwoordmodel klaar voor ${studentName} (confidence: ${makeupTest.confidence ?? 'onbekend'}). Beoordeel en keur goed of pas aan voordat de toets ingezet wordt.`,
+    templateKey: 'ai_makeup_test_ready',
+  });
+
   await admin.from('audit_logs').insert({
     school_id: makeup.school_id, action: 'teacher_review_task_created', entity_type: 'makeup_test', entity_id: makeupTestId,
     detail: { taskId: task.task_id, action: action || 'teacher_approval_required', teacherId },
@@ -274,13 +275,11 @@ async function handleAttendanceSignals(req: Request, admin: Admin) {
         .single();
       actie = { type: 'intervention', id: intervention?.intervention_id };
     }
+    const drempelBody = `${student.full_name} heeft de drempel voor "${type}" bereikt (${aantal}x binnen 60 dagen, drempel: ${threshold}).`;
     if (student.mentor_profile_id) {
-      await admin.from('communications').insert({
-        school_id: student.school_id, student_id: studentId, channel: 'app', template_key: 'attendance_threshold_reached',
-        subject: `Verzuimdrempel bereikt: ${student.full_name}`,
-        body: `${student.full_name} heeft de drempel voor "${type}" bereikt (${aantal}x binnen 60 dagen, drempel: ${threshold}).`, status: 'nieuw',
-      });
+      await notifyStaff(admin, { schoolId: student.school_id, profileId: student.mentor_profile_id, studentId, subject: `Verzuimdrempel bereikt: ${student.full_name}`, body: drempelBody, templateKey: 'attendance_threshold_reached' });
     }
+    await notifyGuardiansAndStudent(admin, { schoolId: student.school_id, studentId, subject: `Verzuimdrempel bereikt: ${student.full_name}`, body: drempelBody, templateKey: 'attendance_threshold_reached_family' });
   }
 
   await admin.from('audit_logs').insert({
@@ -369,19 +368,18 @@ async function handleSignalsMajor(req: Request, admin: Admin) {
     .single();
   if (signalError) throw signalError;
 
+  const signaalBody = `${explanation || 'Groot signaal gedetecteerd.'} Voorgestelde actie: ${suggestedAction || 'oudergesprek_en_bijsturing'}.`;
   const ownerId = mentorId || student.mentor_profile_id;
   if (ownerId) {
     await admin.from('tasks').insert({
       school_id: student.school_id, title: `Groot signaal: bespreek ${student.full_name}`,
-      description: `${explanation || 'Groot signaal gedetecteerd.'} Voorgestelde actie: ${suggestedAction || 'oudergesprek_en_bijsturing'}.`,
+      description: signaalBody,
       owner_profile_id: ownerId, related_student_id: studentId, related_type: 'signal', related_id: signal.signal_id, status: 'nieuw',
     });
+    await notifyStaff(admin, { schoolId: student.school_id, profileId: ownerId, studentId, subject: `Groot signaal: ${student.full_name}`, body: signaalBody, templateKey: 'signal_mentor_notice' });
   }
   if (teamLeaderId) {
-    await admin.from('communications').insert({
-      school_id: student.school_id, student_id: studentId, channel: 'app', template_key: 'signal_teamleider_notice',
-      subject: `Groot signaal: ${student.full_name}`, body: explanation || 'Groot signaal gedetecteerd - zie het signalenoverzicht.', status: 'nieuw',
-    });
+    await notifyStaff(admin, { schoolId: student.school_id, profileId: teamLeaderId, studentId, subject: `Groot signaal: ${student.full_name}`, body: signaalBody, templateKey: 'signal_teamleider_notice' });
   }
   await admin.from('dossier_entries').insert({
     school_id: student.school_id, student_id: studentId, entry_type: 'signaal', related_type: 'signal', related_id: signal.signal_id,
@@ -410,19 +408,16 @@ async function handleMeetingsParentConversationPropose(req: Request, admin: Admi
     .single();
   if (error) throw error;
 
+  const gesprekBody = `Naar aanleiding van recente signalen willen we graag een gesprek plannen over ${student.full_name}. De mentor neemt hierover contact op.`;
   if (signal.mentorId) {
     await admin.from('tasks').insert({
       school_id: student.school_id, title: `Oudergesprek inplannen: ${student.full_name}`,
       description: 'Plan een datum/tijd in en informeer de ouder(s).', owner_profile_id: signal.mentorId,
       related_student_id: studentId, related_type: 'conversation', related_id: conversation.conversation_id, status: 'nieuw',
     });
+    await notifyStaff(admin, { schoolId: student.school_id, profileId: signal.mentorId, studentId, subject: `Oudergesprek voorgesteld: ${student.full_name}`, body: 'Plan een datum/tijd in en informeer de ouder(s).', templateKey: 'parent_conversation_proposed_mentor' });
   }
-  await admin.from('communications').insert({
-    school_id: student.school_id, student_id: studentId, channel: 'email', template_key: 'parent_conversation_proposed',
-    subject: `Verzoek om een gesprek: ${student.full_name}`,
-    body: `Naar aanleiding van recente signalen willen we graag een gesprek plannen over ${student.full_name}. De mentor neemt hierover contact op.`,
-    status: 'wacht_op_goedkeuring',
-  });
+  await notifyGuardiansAndStudent(admin, { schoolId: student.school_id, studentId, subject: `Verzoek om een gesprek: ${student.full_name}`, body: gesprekBody, templateKey: 'parent_conversation_proposed' });
 
   return json({ ok: true, conversationId: conversation.conversation_id, studentId, status: 'nieuw' });
 }
@@ -502,6 +497,7 @@ async function handleOppStart(req: Request, admin: Admin) {
       description: reason || 'Structurele signalen vragen om OPP-voorbereiding.', owner_profile_id: ownerId,
       related_student_id: studentId, related_type: 'opp_plan', related_id: opp.opp_id, status: 'nieuw',
     });
+    await notifyStaff(admin, { schoolId: student.school_id, profileId: ownerId, studentId, subject: `OPP-traject gestart: ${student.full_name}`, body: reason || 'Structurele signalen vragen om OPP-voorbereiding.', templateKey: 'opp_start' });
   }
   await admin.from('dossier_entries').insert({
     school_id: student.school_id, student_id: studentId, entry_type: 'opp_start', related_type: 'opp_plan', related_id: opp.opp_id,
@@ -518,7 +514,7 @@ async function handleOppPrepareSummary(req: Request, admin: Admin) {
 
   const { data: plan } = await admin.from('opp_plans').select('opp_id, school_id, student_id').eq('opp_id', oppId).maybeSingle();
   if (!plan) return json({ error: 'OPP-traject niet gevonden.' }, 404);
-  const { data: student } = await admin.from('students').select('full_name').eq('student_id', plan.student_id).maybeSingle();
+  const { data: student } = await admin.from('students').select('full_name, mentor_profile_id').eq('student_id', plan.student_id).maybeSingle();
 
   const categories: string[] = Array.isArray(include) && include.length ? include : ['results', 'attendance', 'interventions', 'signals', 'dossier'];
   const gathered: Record<string, unknown> = {};
@@ -546,19 +542,56 @@ async function handleOppPrepareSummary(req: Request, admin: Admin) {
     gathered.dossier = dossier || [];
   }
 
-  const system = `Je bent een ervaren zorgcoördinator-adviseur in het Nederlandse voortgezet onderwijs. Op basis van de aangeleverde gegevens (resultaten/inhaalacties, verzuim, interventies, signalen, dossier) maak je een NEUTRALE, feitelijke concept-samenvatting ter voorbereiding van een OPP-traject (ontwikkelingsperspectiefplan). Dit is uitsluitend een concept - jij neemt NOOIT het besluit of een OPP daadwerkelijk gestart of goedgekeurd wordt; dat doet altijd een zorgcoördinator.
+  const system = `Je bent een ervaren zorgcoördinator-adviseur in het Nederlandse voortgezet onderwijs. Op basis van de aangeleverde gegevens (resultaten/inhaalacties, verzuim, interventies, signalen, dossier) maak je een NEUTRALE, feitelijke concept-samenvatting ter voorbereiding van een OPP-traject (ontwikkelingsperspectiefplan), plus een concreet CONCEPT-voorstel voor doelen en acties zodat de zorgcoördinator alleen nog hoeft te beoordelen/goedkeuren i.p.v. het OPP zelf te moeten opstellen. Dit blijft een concept - jij neemt NOOIT het besluit of een OPP daadwerkelijk gestart of goedgekeurd wordt; dat doet altijd een zorgcoördinator.
 
 Antwoord UITSLUITEND met geldige JSON, geen markdown-opmaak:
-{"samenvatting": "neutrale feitelijke samenvatting, 150-250 woorden, in het Nederlands", "aandachtspunten": ["puntsgewijze aandachtspunten"], "confidence": 0.0 tot 1.0}`;
+{"samenvatting": "neutrale feitelijke samenvatting, 150-250 woorden, in het Nederlands", "aandachtspunten": ["puntsgewijze aandachtspunten"], "confidence": 0.0 tot 1.0, "doelen": [{"beschrijving": "concreet, haalbaar doel", "streefweken": 8}], "acties": [{"beschrijving": "concrete actie die dit doel dichterbij brengt", "doelIndex": 0, "rolSuggestie": "mentor of zorgcoordinator", "termijnDagen": 14}]}
+Geef 2 tot 5 doelen en per doel 1-3 acties.`;
   const user = `Leerling: ${student?.full_name || 'onbekend'}\nGegevens: ${JSON.stringify(gathered)}`;
-  const tekst = await callClaude(system, user, 2500);
-  const parsed = parseClaudeJson<{ samenvatting?: string; aandachtspunten?: string[]; confidence?: number }>(tekst, { samenvatting: 'Kon het AI-antwoord niet als JSON parsen - controleer handmatig.', aandachtspunten: [], confidence: 0.3 });
+  const tekst = await callClaude(system, user, 3000);
+  const parsed = parseClaudeJson<{
+    samenvatting?: string; aandachtspunten?: string[]; confidence?: number;
+    doelen?: Array<{ beschrijving: string; streefweken?: number }>;
+    acties?: Array<{ beschrijving: string; doelIndex?: number; rolSuggestie?: string; termijnDagen?: number }>;
+  }>(tekst, { samenvatting: 'Kon het AI-antwoord niet als JSON parsen - controleer handmatig.', aandachtspunten: [], confidence: 0.3, doelen: [], acties: [] });
 
   const volledigeSamenvatting = [parsed.samenvatting, (parsed.aandachtspunten || []).length ? 'Aandachtspunten:\n- ' + (parsed.aandachtspunten || []).join('\n- ') : ''].filter(Boolean).join('\n\n');
   const { error } = await admin.from('opp_plans').update({ ai_summary: volledigeSamenvatting, ai_confidence: parsed.confidence ?? null, ai_data_used: gathered, ai_human_review_required: true }).eq('opp_id', oppId);
   if (error) throw error;
 
-  return json({ ok: true, oppId, confidence: parsed.confidence ?? null, summary: volledigeSamenvatting });
+  let zorgcoordinatorId: string | null = null;
+  const goalIds: string[] = [];
+  for (const doel of parsed.doelen || []) {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + (doel.streefweken ?? 8) * 7);
+    const { data: goal, error: goalError } = await admin
+      .from('opp_goals')
+      .insert({ opp_id: oppId, description: doel.beschrijving, target_date: targetDate.toISOString().slice(0, 10), status: 'nieuw' })
+      .select('goal_id')
+      .single();
+    if (goalError) throw goalError;
+    goalIds.push(goal.goal_id);
+  }
+  for (const actie of parsed.acties || []) {
+    const goalId = actie.doelIndex != null ? goalIds[actie.doelIndex] || null : null;
+    let ownerId: string | null = null;
+    if (actie.rolSuggestie === 'mentor') ownerId = student?.mentor_profile_id || null;
+    else if (actie.rolSuggestie === 'zorgcoordinator') {
+      if (zorgcoordinatorId === null) {
+        const { data: zorg } = await admin.from('profiles').select('id').eq('school_id', plan.school_id).eq('role', 'zorgcoordinator').limit(1).maybeSingle();
+        zorgcoordinatorId = zorg?.id || '';
+      }
+      ownerId = zorgcoordinatorId || null;
+    }
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + (actie.termijnDagen ?? 14));
+    await admin.from('opp_actions').insert({
+      opp_id: oppId, goal_id: goalId, description: actie.beschrijving, owner_profile_id: ownerId,
+      due_date: dueDate.toISOString().slice(0, 10), status: 'nieuw',
+    });
+  }
+
+  return json({ ok: true, oppId, confidence: parsed.confidence ?? null, summary: volledigeSamenvatting, goalsCreated: goalIds.length, actionsCreated: (parsed.acties || []).length });
 }
 
 async function handleOppDueReviews(admin: Admin) {
@@ -586,19 +619,14 @@ async function handleOppSendReviewReminders(req: Request, admin: Admin) {
   const { reviews } = await req.json();
   let verstuurd = 0;
   for (const r of reviews || []) {
-    if (!r.schoolId) continue;
-    const { error } = await admin.from('communications').insert({
-      school_id: r.schoolId, student_id: r.studentId || null, channel: 'app', template_key: 'opp_review_due',
-      subject: `OPP-evaluatie ${r.overdue ? '(te laat) ' : ''}nodig: ${r.studentName || ''}`,
-      body: `De OPP-evaluatie voor ${r.studentName || 'deze leerling'} stond gepland op ${r.reviewDueDate}.`, status: 'nieuw',
+    if (!r.schoolId || !r.ownerProfileId) continue;
+    const body = `De OPP-evaluatie voor ${r.studentName || 'deze leerling'} stond gepland op ${r.reviewDueDate}.`;
+    await admin.from('tasks').insert({
+      school_id: r.schoolId, title: `OPP-evaluatie: ${r.studentName || ''}`, description: `Deadline: ${r.reviewDueDate}.`,
+      owner_profile_id: r.ownerProfileId, related_student_id: r.studentId || null, related_type: 'opp_plan', related_id: r.oppId || null, status: 'nieuw',
     });
-    if (r.ownerProfileId) {
-      await admin.from('tasks').insert({
-        school_id: r.schoolId, title: `OPP-evaluatie: ${r.studentName || ''}`, description: `Deadline: ${r.reviewDueDate}.`,
-        owner_profile_id: r.ownerProfileId, related_student_id: r.studentId || null, related_type: 'opp_plan', related_id: r.oppId || null, status: 'nieuw',
-      });
-    }
-    if (!error) verstuurd++;
+    await notifyStaff(admin, { schoolId: r.schoolId, profileId: r.ownerProfileId, studentId: r.studentId || null, subject: `OPP-evaluatie ${r.overdue ? '(te laat) ' : ''}nodig: ${r.studentName || ''}`, body, templateKey: 'opp_review_due' });
+    verstuurd++;
   }
   return json({ ok: true, remindersSent: verstuurd, totalReviews: (reviews || []).length });
 }
@@ -659,6 +687,7 @@ Antwoord UITSLUITEND met geldige JSON, geen markdown-opmaak:
       description: agendaTekst, owner_profile_id: coordinator.id, related_type: 'mdo_agenda', status: 'nieuw',
       due_date: volgendeWeek.toISOString().slice(0, 10),
     });
+    await notifyStaff(admin, { schoolId, profileId: coordinator.id, subject: `Zorgoverleg (MDO) voorbereid - ${candidates.length} kandidaten`, body: agendaTekst, templateKey: 'mdo_agenda_ready' });
   }
   for (const c of candidates) {
     await admin.from('dossier_entries').insert({
@@ -672,11 +701,37 @@ Antwoord UITSLUITEND met geldige JSON, geen markdown-opmaak:
 
 // === Fase 5: toetsbank + surveillance + rooster/capaciteit ======================
 
+// Fase 8: iedereen die iets moet weten krijgt een communications-rij
+// (die WF16 daarna echt als e-mail verstuurt) - niet alleen een tasks-rij
+// voor staff. student_id/guardian_id blijven het adresseringsmechanisme
+// voor leerling/ouder; recipient_profile_id voor staff (zie schema.sql).
+async function notifyStaff(admin: Admin, opts: { schoolId: string; profileId: string; studentId?: string | null; subject: string; body: string; templateKey: string }) {
+  await admin.from('communications').insert({
+    school_id: opts.schoolId, recipient_profile_id: opts.profileId, student_id: opts.studentId || null,
+    channel: 'email', template_key: opts.templateKey, subject: opts.subject, body: opts.body, status: 'nieuw',
+  });
+}
+
+async function notifyGuardiansAndStudent(admin: Admin, opts: { schoolId: string; studentId: string; subject: string; body: string; templateKey: string }) {
+  const { data: guardianLinks } = await admin.from('student_guardians').select('guardian_id').eq('student_id', opts.studentId);
+  for (const g of guardianLinks || []) {
+    await admin.from('communications').insert({
+      school_id: opts.schoolId, student_id: opts.studentId, guardian_id: g.guardian_id,
+      channel: 'email', template_key: opts.templateKey, subject: opts.subject, body: opts.body, status: 'nieuw',
+    });
+  }
+  // Leerling zelf (als die een eigen account heeft) krijgt dezelfde melding.
+  await admin.from('communications').insert({
+    school_id: opts.schoolId, student_id: opts.studentId,
+    channel: 'email', template_key: opts.templateKey, subject: opts.subject, body: opts.body, status: 'nieuw',
+  });
+}
+
 async function handleSchedulingFindSlot(req: Request, admin: Admin) {
   const { studentId, actionType, subjectId, preferredDateFrom, deadline, requiredSupervisorRole } = await req.json();
   if (!studentId) return json({ error: 'studentId is verplicht.' }, 400);
 
-  const { data: student } = await admin.from('students').select('student_id, school_id').eq('student_id', studentId).maybeSingle();
+  const { data: student } = await admin.from('students').select('student_id, school_id, full_name, mentor_profile_id').eq('student_id', studentId).maybeSingle();
   if (!student) return json({ error: 'Leerling niet gevonden.' }, 404);
 
   const van = preferredDateFrom ? new Date(preferredDateFrom) : new Date();
@@ -701,6 +756,14 @@ async function handleSchedulingFindSlot(req: Request, admin: Admin) {
       if ((count || 0) < slot.capacity) {
         const { error } = await admin.from('makeup_tests').update({ makeup_slot_id: slot.makeup_slot_id, status: 'klaargezet_voor_afname' }).eq('makeup_test_id', eigen.makeup_test_id);
         if (error) throw error;
+
+        const wanneer = new Date(slot.starts_at).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+        const body = `${student.full_name} is ingepland voor de inhaaltoets op ${wanneer}${slot.location ? ` in ${slot.location}` : ''}.`;
+        await notifyGuardiansAndStudent(admin, { schoolId: student.school_id, studentId, subject: `Inhaaltoets ingepland: ${student.full_name}`, body, templateKey: 'makeup_test_scheduled' });
+        if (student.mentor_profile_id) {
+          await notifyStaff(admin, { schoolId: student.school_id, profileId: student.mentor_profile_id, studentId, subject: `Inhaaltoets ingepland: ${student.full_name}`, body, templateKey: 'makeup_test_scheduled' });
+        }
+
         return json({ ok: true, found: true, makeupTestId: eigen.makeup_test_id, slotId: slot.makeup_slot_id, startsAt: slot.starts_at, location: slot.location });
       }
     }
@@ -724,10 +787,122 @@ async function handleSchedulingFindSlot(req: Request, admin: Admin) {
     if ((count || 0) < slot.capacity) {
       const { error } = await admin.from('maatwerk_assignments').update({ maatwerk_slot_id: slot.maatwerk_slot_id, status: 'gepland' }).eq('assignment_id', eigenMaatwerk.assignment_id);
       if (error) throw error;
+
+      const wanneer = new Date(slot.starts_at).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+      const body = `${student.full_name} is ingepland voor een maatwerkuur op ${wanneer}.`;
+      await notifyGuardiansAndStudent(admin, { schoolId: student.school_id, studentId, subject: `Maatwerkuur ingepland: ${student.full_name}`, body, templateKey: 'maatwerk_scheduled' });
+      if (student.mentor_profile_id) {
+        await notifyStaff(admin, { schoolId: student.school_id, profileId: student.mentor_profile_id, studentId, subject: `Maatwerkuur ingepland: ${student.full_name}`, body, templateKey: 'maatwerk_scheduled' });
+      }
+
       return json({ ok: true, found: true, assignmentId: eigenMaatwerk.assignment_id, slotId: slot.maatwerk_slot_id, startsAt: slot.starts_at });
     }
   }
   return json({ ok: true, found: false, message: 'Geen beschikbaar maatwerkmoment gevonden binnen de opgegeven periode.' });
+}
+
+// Zet uit elk actief weekpatroon concrete, gedateerde slots voor de
+// komende 6 weken - patronen zelf worden nooit rechtstreeks ingepland.
+// Idempotent: slaat een (pattern_id, starts_at)-combinatie over als die
+// al bestaat, dus veilig om vaker te draaien (knop + wekelijkse cron).
+async function handleSchedulingGenerateSlots(admin: Admin) {
+  const WEKEN_VOORUIT = 6;
+  const vandaag = new Date();
+  vandaag.setHours(0, 0, 0, 0);
+
+  let makeupAangemaakt = 0;
+  let maatwerkAangemaakt = 0;
+
+  const { data: makeupPatterns } = await admin.from('makeup_slot_patterns').select('*').eq('active', true);
+  for (const p of makeupPatterns || []) {
+    for (let dag = 0; dag < WEKEN_VOORUIT * 7; dag++) {
+      const datum = new Date(vandaag);
+      datum.setDate(datum.getDate() + dag);
+      const isoWeekdag = ((datum.getDay() + 6) % 7) + 1; // JS: 0=zondag -> ISO: 1=maandag..7=zondag
+      if (isoWeekdag !== p.weekday) continue;
+      const dagStr = datum.toISOString().slice(0, 10);
+      const startsAt = new Date(`${dagStr}T${p.start_time}`);
+      const endsAt = new Date(`${dagStr}T${p.end_time}`);
+      if (startsAt < new Date()) continue;
+
+      const { data: bestaand } = await admin.from('makeup_slots').select('makeup_slot_id').eq('pattern_id', p.pattern_id).eq('starts_at', startsAt.toISOString()).maybeSingle();
+      if (bestaand) continue;
+
+      const { error } = await admin.from('makeup_slots').insert({
+        school_id: p.school_id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(),
+        location: p.location, supervisor_profile_id: p.supervisor_profile_id, capacity: p.capacity, pattern_id: p.pattern_id,
+      });
+      if (!error) makeupAangemaakt++;
+    }
+  }
+
+  const { data: maatwerkPatterns } = await admin.from('maatwerk_slot_patterns').select('*').eq('active', true);
+  for (const p of maatwerkPatterns || []) {
+    for (let dag = 0; dag < WEKEN_VOORUIT * 7; dag++) {
+      const datum = new Date(vandaag);
+      datum.setDate(datum.getDate() + dag);
+      const isoWeekdag = ((datum.getDay() + 6) % 7) + 1;
+      if (isoWeekdag !== p.weekday) continue;
+      const dagStr = datum.toISOString().slice(0, 10);
+      const startsAt = new Date(`${dagStr}T${p.start_time}`);
+      const endsAt = new Date(`${dagStr}T${p.end_time}`);
+      if (startsAt < new Date()) continue;
+
+      const { data: bestaand } = await admin.from('maatwerk_slots').select('maatwerk_slot_id').eq('pattern_id', p.pattern_id).eq('starts_at', startsAt.toISOString()).maybeSingle();
+      if (bestaand) continue;
+
+      const { error } = await admin.from('maatwerk_slots').insert({
+        school_id: p.school_id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(),
+        subject_id: p.subject_id, teacher_profile_id: p.teacher_profile_id, capacity: p.capacity, pattern_id: p.pattern_id,
+      });
+      if (!error) maatwerkAangemaakt++;
+    }
+  }
+
+  return json({ ok: true, makeupSlotsCreated: makeupAangemaakt, maatwerkSlotsCreated: maatwerkAangemaakt });
+}
+
+// Poll-paar voor WF16 (e-mailmeldingen versturen) - zelfde patroon als
+// actions/due + actions/send-reminders. `pending` lost het echte
+// e-mailadres op; rijen zonder resolveerbaar adres worden overgeslagen
+// (blijven status 'nieuw' staan, komen bij de volgende poll terug pas
+// mee zodra het adres wel resolveert - voorkomt stille dataverlies).
+async function handleCommunicationsPending(admin: Admin) {
+  const { data: rows } = await admin
+    .from('communications')
+    .select('communication_id, school_id, subject, body, channel, recipient_profile_id, guardian_id, student_id, profiles(email, full_name), guardians(email, full_name), students(profile_id)')
+    .eq('status', 'nieuw')
+    .order('created_at', { ascending: true })
+    .limit(200);
+
+  const pending = [];
+  for (const r of rows || []) {
+    let email = null;
+    let naam = null;
+    if (r.recipient_profile_id) {
+      email = r.profiles?.email || null;
+      naam = r.profiles?.full_name || null;
+    } else if (r.guardian_id) {
+      email = r.guardians?.email || null;
+      naam = r.guardians?.full_name || null;
+    } else if (r.student_id && r.students?.profile_id) {
+      const { data: leerlingProfiel } = await admin.from('profiles').select('email, full_name').eq('id', r.students.profile_id).maybeSingle();
+      email = leerlingProfiel?.email || null;
+      naam = leerlingProfiel?.full_name || null;
+    }
+    if (!email) continue;
+    pending.push({ communicationId: r.communication_id, email, naam, subject: r.subject, body: r.body });
+  }
+
+  return json({ ok: true, pending, count: pending.length });
+}
+
+async function handleCommunicationsMarkSent(req: Request, admin: Admin) {
+  const { communicationIds } = await req.json();
+  if (!Array.isArray(communicationIds) || !communicationIds.length) return json({ ok: true, marked: 0 });
+  const { error } = await admin.from('communications').update({ status: 'afgerond', sent_at: new Date().toISOString() }).in('communication_id', communicationIds);
+  if (error) throw error;
+  return json({ ok: true, marked: communicationIds.length });
 }
 
 async function handleSupervisionToday(admin: Admin) {
@@ -967,6 +1142,9 @@ const ROUTES: Record<string, (req: Request, admin: Admin) => Promise<Response>> 
   'POST /management/generate-report': handleManagementGenerateReport,
   'POST /management/send-report': handleManagementSendReport,
   'POST /integrations/lvs/import': handleIntegrationsLvsImport,
+  'POST /scheduling/generate-slots': (_req, admin) => handleSchedulingGenerateSlots(admin),
+  'GET /communications/pending': (_req, admin) => handleCommunicationsPending(admin),
+  'POST /communications/mark-sent': handleCommunicationsMarkSent,
 };
 
 Deno.serve(async (req) => {

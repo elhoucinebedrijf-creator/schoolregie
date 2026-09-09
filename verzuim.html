@@ -309,13 +309,19 @@
         status: 'nieuw', notes: `${aantal}x ${eventType} binnen 60 dagen (drempel: ${threshold}).`,
       });
     }
+    const drempelSubject = `Verzuimdrempel bereikt: ${student?.full_name || ''}`;
+    const drempelBody = `${student?.full_name || 'De leerling'} heeft de drempel voor "${eventType}" bereikt (${aantal}x binnen 60 dagen, drempel: ${threshold}).`;
     if (student?.mentor_profile_id) {
       await supabase.from('communications').insert({
-        school_id: profile.school_id, student_id: studentId, channel: 'app', template_key: 'attendance_threshold_reached',
-        subject: `Verzuimdrempel bereikt: ${student.full_name}`,
-        body: `${student.full_name} heeft de drempel voor "${eventType}" bereikt (${aantal}x binnen 60 dagen, drempel: ${threshold}).`, status: 'nieuw',
+        school_id: profile.school_id, student_id: studentId, recipient_profile_id: student.mentor_profile_id,
+        channel: 'email', template_key: 'attendance_threshold_reached', subject: drempelSubject, body: drempelBody, status: 'nieuw',
       });
     }
+    const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', studentId);
+    for (const g of guardianLinks || []) {
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, guardian_id: g.guardian_id, channel: 'email', template_key: 'attendance_threshold_reached_family', subject: drempelSubject, body: drempelBody, status: 'nieuw' });
+    }
+    await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, channel: 'email', template_key: 'attendance_threshold_reached_family', subject: drempelSubject, body: drempelBody, status: 'nieuw' });
   }
 
   async function initStudentView() {

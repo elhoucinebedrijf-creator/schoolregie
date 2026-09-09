@@ -182,19 +182,25 @@
     async function laadRijen() {
       const { data: rows, error } = await supabase
         .from('maatwerk_assignments')
-        .select('assignment_id, status, mentor_approved, advice_reason, students(full_name), subjects(name)')
+        .select('assignment_id, status, mentor_approved, advice_reason, student_id, subject_id, maatwerk_slot_id, students(full_name), subjects(name)')
         .order('created_at', { ascending: false });
       if (error) { $('#rows-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
       $('#rows-body').innerHTML = (rows || []).length
-        ? rows.map((r) => `<tr>
+        ? rows.map((r) => {
+            let actie = '';
+            if (!r.mentor_approved && r.status === 'nieuw') {
+              actie = `<button class="btn btn-sm btn-primary" data-goedkeuren="${r.assignment_id}">Goedkeuren</button> <button class="btn btn-sm btn-ghost" data-afwijzen="${r.assignment_id}">Afwijzen</button>`;
+            } else if (r.status === 'goedgekeurd' && !r.maatwerk_slot_id) {
+              actie = `<button class="btn btn-sm btn-primary" data-inplannen="${r.assignment_id}" data-student="${r.student_id}" data-subject="${r.subject_id || ''}">Inplannen</button>`;
+            }
+            return `<tr>
             <td>${escapeHtml(r.students?.full_name || '—')}</td>
             <td>${escapeHtml(r.subjects?.name || '—')}</td>
             <td>${escapeHtml(r.advice_reason || '—')}</td>
             <td>${statusBadge(r.status)}</td>
-            <td>${!r.mentor_approved && r.status === 'nieuw'
-              ? `<button class="btn btn-sm btn-primary" data-goedkeuren="${r.assignment_id}">Goedkeuren</button> <button class="btn btn-sm btn-ghost" data-afwijzen="${r.assignment_id}">Afwijzen</button>`
-              : ''}</td>
-          </tr>`).join('')
+            <td>${actie}</td>
+          </tr>`;
+          }).join('')
         : `<tr><td colspan="5" style="color:var(--text-muted);">Nog geen maatwerkadviezen.</td></tr>`;
 
       $$('[data-goedkeuren]').forEach((btn) => btn.addEventListener('click', async () => {
@@ -208,6 +214,53 @@
         if (error) { toast(friendlyError(error), 'critical'); return; }
         await laadRijen();
       }));
+      $$('[data-inplannen]').forEach((btn) => btn.addEventListener('click', async () => {
+        setLoading(btn, true, 'Bezig…');
+        try {
+          await plaatsMaatwerk(btn.dataset.inplannen, btn.dataset.student, btn.dataset.subject || null);
+        } catch (err) {
+          toast(friendlyError(err), 'critical');
+        } finally {
+          setLoading(btn, false);
+        }
+      }));
+    }
+
+    // Zoekt het eerstvolgende maatwerkmoment met vrije capaciteit (optioneel
+    // gefilterd op vak) en plaatst de leerling erin - zelfde logica als
+    // scheduling/find-slot in api/index.ts, hier client-side via RLS.
+    async function plaatsMaatwerk(assignmentId, studentId, subjectId) {
+      let query = supabase
+        .from('maatwerk_slots')
+        .select('maatwerk_slot_id, starts_at, capacity, subject_id, maatwerk_assignments(assignment_id)')
+        .eq('school_id', profile.school_id)
+        .gte('starts_at', new Date().toISOString())
+        .order('starts_at', { ascending: true });
+      if (subjectId) query = query.eq('subject_id', subjectId);
+      const { data: slots } = await query;
+
+      const slot = (slots || []).find((s) => (s.maatwerk_assignments || []).length < s.capacity);
+      if (!slot) { toast('Geen beschikbaar maatwerkmoment gevonden - voeg een moment toe via Rooster & capaciteit.', 'critical'); return; }
+
+      const { error: e1 } = await supabase.from('maatwerk_assignments').update({ maatwerk_slot_id: slot.maatwerk_slot_id, status: 'gepland' }).eq('assignment_id', assignmentId);
+      if (e1) throw e1;
+
+      const { data: student } = await supabase.from('students').select('full_name, mentor_profile_id').eq('student_id', studentId).maybeSingle();
+      const wanneer = new Date(slot.starts_at).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+      const body = `${student?.full_name || 'De leerling'} is ingepland voor een maatwerkuur op ${wanneer}.`;
+      const subject = `Maatwerkuur ingepland: ${student?.full_name || ''}`;
+
+      const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', studentId);
+      for (const g of guardianLinks || []) {
+        await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, guardian_id: g.guardian_id, channel: 'email', template_key: 'maatwerk_scheduled', subject, body, status: 'nieuw' });
+      }
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, channel: 'email', template_key: 'maatwerk_scheduled', subject, body, status: 'nieuw' });
+      if (student?.mentor_profile_id) {
+        await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, recipient_profile_id: student.mentor_profile_id, channel: 'email', template_key: 'maatwerk_scheduled', subject, body, status: 'nieuw' });
+      }
+
+      toast('Ingepland en betrokkenen geïnformeerd.', 'good');
+      await laadRijen();
     }
   }
 

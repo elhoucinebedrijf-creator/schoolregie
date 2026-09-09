@@ -11,8 +11,9 @@ context en fase-indeling staan in
 
 **Live:** https://schoolregie.vercel.app
 **Supabase-project:** `kuxagvhesctephrgfpfo`
-**n8n:** `n8n.elhoucineautomation.nl` (Hostinger Docker Manager) - alle
-15 workflows actief
+**n8n:** `n8n.elhoucineautomation.nl` (Hostinger Docker Manager) - 16 van
+de 17 workflows actief (WF16 e-mailmeldingen wacht op een SMTP-
+credential, zie "Fase 8" onderaan)
 **GitHub:** https://github.com/elhoucinebedrijf-creator/schoolregie
 
 ## Status
@@ -282,6 +283,49 @@ Pagina's `cockpit.html`, `import.html`. 4 nieuwe routes in
 door de n8n-normalisatiestap - werkt nu (één demo-school) via een
 fallback, maar moet bijgewerkt worden zodra er meer dan één school
 actief is.
+
+## Fase 8 - Vaste roosterpatronen + echte e-mailmeldingen + kant-en-klare OPP-concepten
+
+Gebruikersfeedback na oplevering: inhaal-/maatwerkmomenten moeten vaste,
+wekelijks terugkerende tijden zijn (niet losse eenmalige momenten),
+alle betrokkenen moeten een echte e-mail krijgen zodra iets gesignaleerd/
+geregeld is (niet alleen een in-app-melding), en OPP moet een kant-en-
+klaar concept zijn (concrete doelen/acties, niet alleen een samenvatting).
+
+- **Vaste weekpatronen**: `makeup_slot_patterns`/`maatwerk_slot_patterns`
+  (dag + tijd + lokaal/vak + capaciteit) - `rooster.html` laat je die
+  instellen; `scheduling/generate-slots` zet daar automatisch concrete,
+  gedateerde `makeup_slots`/`maatwerk_slots`-rijen van neer voor de
+  komende 6 weken (idempotent - veilig om vaker te draaien). WF17 houdt
+  dit wekelijks automatisch actueel.
+- **Echte e-mailmeldingen**: `communications.recipient_profile_id`
+  generaliseert die tabel van "alleen ouder/leerling" naar "iedereen" -
+  staff (docent/mentor/teamleider/zorgcoördinator) krijgt er nu ook een
+  rij van, niet alleen een `tasks`-taak. `communications/pending` +
+  `communications/mark-sent` (nieuw poll-paar) lossen het echte
+  e-mailadres op; WF16 (n8n, elke 5 minuten) haalt ze op en verstuurt ze
+  echt via een SMTP-node.
+  **Belangrijke bug gevonden tijdens het bouwen**: meerdere bestaande
+  meldingen (gemiste toets, verzuimdrempel, groot signaal, OPP-
+  herinnering) adresseerden zichzelf per ongeluk aan de leerling i.p.v.
+  aan de bedoelde docent/mentor/teamleider - zonder een geldig
+  e-mailadres zouden die nooit verstuurd zijn. Gecorrigeerd via de
+  nieuwe `notifyStaff()`/`notifyGuardiansAndStudent()`-helpers.
+  "Inplannen"-knoppen op `gemiste-toetsen.html`/`maatwerk.html` sturen
+  meteen een plaatsingsmelding naar leerling + ouder(s) + mentor - het
+  letterlijke scenario dat gevraagd werd.
+- **Kant-en-klare OPP-concepten**: `opp/prepare-summary` genereert nu
+  ook 2-5 concrete `opp_goals` + gekoppelde `opp_actions` (met
+  streefdatum/deadline en een rolgebaseerde eigenaar-suggestie:
+  mentor/zorgcoördinator), niet alleen samenvattingstekst -
+  `opp-zorg.html` toont ze met per-item goedkeuren/afwijzen.
+
+**WF16 is nog niet geactiveerd** - de "Verstuur e-mail"-node heeft een
+SMTP-credential nodig die de gebruiker zelf in n8n's credentials-UI
+aanmaakt (kan niet via de API zonder het wachtwoord te zien), plus de
+env-var `SCHOOLREGIE_EMAIL_TEST_OVERRIDE` (stuurt tijdens het testen
+alles naar één vast adres i.p.v. de echte ontvangers) vóórdat er
+daadwerkelijk getest en geactiveerd wordt.
 
 ## n8n-koppeling: één gedeelde `api`-functie
 

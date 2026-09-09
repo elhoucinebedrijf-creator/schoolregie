@@ -234,7 +234,7 @@
     async function laadRijen() {
       const { data: rows, error } = await supabase
         .from('missed_tests')
-        .select('missed_test_id, reason, status, created_at, test_id, students(full_name), tests(title), makeup_tests(makeup_test_id, status, document_id)')
+        .select('missed_test_id, reason, status, created_at, test_id, student_id, students(full_name, mentor_profile_id), tests(title), makeup_tests(makeup_test_id, status, document_id)')
         .order('created_at', { ascending: false });
       if (error) {
         $('#rows-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`;
@@ -251,6 +251,8 @@
           actie = `<button class="btn btn-sm btn-secondary" data-genereer="${r.missed_test_id}">AI-inhaaltoets genereren</button>`;
         } else if (makeup?.status === 'wacht_op_goedkeuring') {
           actie = `<button class="btn btn-sm btn-primary" data-beoordeel="${r.missed_test_id}" data-makeup="${makeup.makeup_test_id}">Beoordelen</button>`;
+        } else if (makeup?.status === 'goedgekeurd') {
+          actie = `<button class="btn btn-sm btn-primary" data-inplannen="${makeup.makeup_test_id}" data-student="${r.student_id}">Inplannen</button>`;
         }
         return `<tr>
           <td>${escapeHtml(r.students?.full_name || '—')}</td>
@@ -267,6 +269,16 @@
         openModal('#genereer-modal');
       }));
       $$('[data-beoordeel]').forEach((btn) => btn.addEventListener('click', () => beoordeelOpenen(btn.dataset.makeup, btn.dataset.beoordeel)));
+      $$('[data-inplannen]').forEach((btn) => btn.addEventListener('click', async () => {
+        setLoading(btn, true, 'Bezig…');
+        try {
+          await plaatsInhaaltoets(btn.dataset.inplannen, btn.dataset.student);
+        } catch (err) {
+          toast(friendlyError(err), 'critical');
+        } finally {
+          setLoading(btn, false);
+        }
+      }));
     }
 
     async function beoordeelOpenen(makeupTestId, missedTestId) {
@@ -308,6 +320,42 @@
         }
       };
       openModal('#beoordeel-modal');
+    }
+
+    // Zoekt het eerstvolgende inhaalmoment met vrije capaciteit en plaatst
+    // de leerling erin - client-side, RLS (staff heeft al schrijfrechten),
+    // zelfde logica als scheduling/find-slot in api/index.ts. Stuurt
+    // meteen een plaatsingsmelding naar leerling + ouder(s) + mentor.
+    async function plaatsInhaaltoets(makeupTestId, studentId) {
+      const { data: slots } = await supabase
+        .from('makeup_slots')
+        .select('makeup_slot_id, starts_at, location, capacity, makeup_tests(makeup_test_id)')
+        .eq('school_id', profile.school_id)
+        .gte('starts_at', new Date().toISOString())
+        .order('starts_at', { ascending: true });
+
+      const slot = (slots || []).find((s) => (s.makeup_tests || []).length < s.capacity);
+      if (!slot) { toast('Geen beschikbaar inhaalmoment gevonden - voeg een moment toe via Rooster & capaciteit.', 'critical'); return; }
+
+      const { error: e1 } = await supabase.from('makeup_tests').update({ makeup_slot_id: slot.makeup_slot_id, status: 'klaargezet_voor_afname' }).eq('makeup_test_id', makeupTestId);
+      if (e1) throw e1;
+
+      const { data: student } = await supabase.from('students').select('full_name, mentor_profile_id').eq('student_id', studentId).maybeSingle();
+      const wanneer = new Date(slot.starts_at).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+      const body = `${student?.full_name || 'De leerling'} is ingepland voor de inhaaltoets op ${wanneer}${slot.location ? ` in ${slot.location}` : ''}.`;
+      const subject = `Inhaaltoets ingepland: ${student?.full_name || ''}`;
+
+      const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', studentId);
+      for (const g of guardianLinks || []) {
+        await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, guardian_id: g.guardian_id, channel: 'email', template_key: 'makeup_test_scheduled', subject, body, status: 'nieuw' });
+      }
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, channel: 'email', template_key: 'makeup_test_scheduled', subject, body, status: 'nieuw' });
+      if (student?.mentor_profile_id) {
+        await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, recipient_profile_id: student.mentor_profile_id, channel: 'email', template_key: 'makeup_test_scheduled', subject, body, status: 'nieuw' });
+      }
+
+      toast('Ingepland en betrokkenen geïnformeerd.', 'good');
+      await laadRijen();
     }
   }
 

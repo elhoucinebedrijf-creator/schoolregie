@@ -48,7 +48,28 @@
 
     <div class="content">
       <div class="card" style="margin-bottom:16px;">
-        <div class="card-row"><h3>Inhaalmomenten (toetsen)</h3><button class="btn btn-primary" id="btn-nieuw-makeup">+ Moment toevoegen</button></div>
+        <div class="card-row"><h3>Vaste weekpatronen</h3><button class="btn btn-primary" id="btn-genereren">Genereer komende 6 weken</button></div>
+        <p class="hint">Inhaal- en maatwerkmomenten zijn wekelijks terugkerende vaste tijden - stel hier het patroon in, de knop zet daar automatisch concrete, gedateerde momenten van neer (voor de komende 6 weken, veilig om vaker te klikken).</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <div class="card-row"><h4>Inhaalpatronen</h4><button class="btn btn-sm btn-secondary" id="btn-nieuw-makeup-pattern">+ Patroon</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Dag</th><th>Tijd</th><th>Lokaal</th><th></th></tr></thead>
+              <tbody id="makeup-patterns-body"></tbody>
+            </table></div>
+          </div>
+          <div>
+            <div class="card-row"><h4>Maatwerkpatronen</h4><button class="btn btn-sm btn-secondary" id="btn-nieuw-maatwerk-pattern">+ Patroon</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Dag</th><th>Tijd</th><th>Vak</th><th></th></tr></thead>
+              <tbody id="maatwerk-patterns-body"></tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>Inhaalmomenten (toetsen)</h3><button class="btn btn-primary" id="btn-nieuw-makeup">+ Los moment toevoegen</button></div>
         <p class="hint">"Scheduling/find-slot" (n8n) en de "Inplannen"-knop op Gemiste toetsen kiezen automatisch het eerstvolgende moment met vrije capaciteit.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Datum/tijd</th><th>Lokaal</th><th>Surveillant</th><th>Bezet</th></tr></thead>
@@ -57,13 +78,65 @@
       </div>
 
       <div class="card">
-        <div class="card-row"><h3>Maatwerkmomenten</h3><button class="btn btn-primary" id="btn-nieuw-maatwerk">+ Moment toevoegen</button></div>
+        <div class="card-row"><h3>Maatwerkmomenten</h3><button class="btn btn-primary" id="btn-nieuw-maatwerk">+ Los moment toevoegen</button></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Datum/tijd</th><th>Vak</th><th>Docent</th><th>Bezet</th></tr></thead>
           <tbody id="maatwerk-slots-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
         </table></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- modal: inhaalpatroon toevoegen -->
+<div class="modal-backdrop" id="makeup-pattern-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Vast inhaalpatroon toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="makeup-pattern-form">
+      <div class="field"><label for="mp-weekday">Dag</label>
+        <select id="mp-weekday">
+          <option value="1">Maandag</option><option value="2">Dinsdag</option><option value="3">Woensdag</option>
+          <option value="4">Donderdag</option><option value="5">Vrijdag</option><option value="6">Zaterdag</option><option value="7">Zondag</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="field"><label for="mp-start">Start</label><input type="time" id="mp-start" required /></div>
+        <div class="field"><label for="mp-end">Einde</label><input type="time" id="mp-end" required /></div>
+      </div>
+      <div class="field"><label for="mp-location">Lokaal</label><input id="mp-location" /></div>
+      <div class="field"><label for="mp-supervisor">Surveillant</label><select id="mp-supervisor"></select></div>
+      <div class="field"><label for="mp-capacity">Capaciteit</label><input type="number" id="mp-capacity" min="1" value="3" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="mp-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: maatwerkpatroon toevoegen -->
+<div class="modal-backdrop" id="maatwerk-pattern-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Vast maatwerkpatroon toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="maatwerk-pattern-form">
+      <div class="field"><label for="wp-weekday">Dag</label>
+        <select id="wp-weekday">
+          <option value="1">Maandag</option><option value="2">Dinsdag</option><option value="3">Woensdag</option>
+          <option value="4">Donderdag</option><option value="5">Vrijdag</option><option value="6">Zaterdag</option><option value="7">Zondag</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="field"><label for="wp-start">Start</label><input type="time" id="wp-start" required /></div>
+        <div class="field"><label for="wp-end">Einde</label><input type="time" id="wp-end" required /></div>
+      </div>
+      <div class="field"><label for="wp-subject">Vak</label><select id="wp-subject"></select></div>
+      <div class="field"><label for="wp-teacher">Docent</label><select id="wp-teacher"></select></div>
+      <div class="field"><label for="wp-capacity">Capaciteit</label><input type="number" id="wp-capacity" min="1" value="4" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="wp-submit">Toevoegen</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -130,9 +203,60 @@
   $('#m-supervisor').innerHTML = (surveillanten || []).map((s) => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('');
   $('#w-subject').innerHTML = (subjects || []).map((s) => `<option value="${s.subject_id}">${escapeHtml(s.name)}</option>`).join('');
   $('#w-teacher').innerHTML = (docenten || []).map((d) => `<option value="${d.id}">${escapeHtml(d.full_name)}</option>`).join('');
+  $('#mp-supervisor').innerHTML = (surveillanten || []).map((s) => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('');
+  $('#wp-subject').innerHTML = (subjects || []).map((s) => `<option value="${s.subject_id}">${escapeHtml(s.name)}</option>`).join('');
+  $('#wp-teacher').innerHTML = (docenten || []).map((d) => `<option value="${d.id}">${escapeHtml(d.full_name)}</option>`).join('');
+
+  const WEEKDAG_LABEL = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
 
   $('#btn-nieuw-makeup').addEventListener('click', () => openModal('#makeup-modal'));
   $('#btn-nieuw-maatwerk').addEventListener('click', () => openModal('#maatwerk-modal'));
+  $('#btn-nieuw-makeup-pattern').addEventListener('click', () => openModal('#makeup-pattern-modal'));
+  $('#btn-nieuw-maatwerk-pattern').addEventListener('click', () => openModal('#maatwerk-pattern-modal'));
+
+  $('#makeup-pattern-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#mp-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('makeup_slot_patterns').insert({
+        school_id: profile.school_id, weekday: Number($('#mp-weekday').value), start_time: $('#mp-start').value, end_time: $('#mp-end').value,
+        location: $('#mp-location').value.trim() || null, supervisor_profile_id: $('#mp-supervisor').value || null, capacity: Number($('#mp-capacity').value) || 1,
+      });
+      if (error) throw error;
+      toast('Inhaalpatroon toegevoegd.', 'good');
+      closeModal('#makeup-pattern-modal');
+      e.target.reset();
+      await Promise.all([laadPatronen(), genereerSlots(true)]);
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#maatwerk-pattern-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#wp-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('maatwerk_slot_patterns').insert({
+        school_id: profile.school_id, weekday: Number($('#wp-weekday').value), start_time: $('#wp-start').value, end_time: $('#wp-end').value,
+        subject_id: $('#wp-subject').value || null, teacher_profile_id: $('#wp-teacher').value || null, capacity: Number($('#wp-capacity').value) || 1,
+      });
+      if (error) throw error;
+      toast('Maatwerkpatroon toegevoegd.', 'good');
+      closeModal('#maatwerk-pattern-modal');
+      e.target.reset();
+      await Promise.all([laadPatronen(), genereerSlots(true)]);
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#btn-genereren').addEventListener('click', () => genereerSlots(false));
 
   $('#makeup-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -176,7 +300,93 @@
     }
   });
 
-  await Promise.all([laadMakeupSlots(), laadMaatwerkSlots()]);
+  await Promise.all([laadPatronen(), laadMakeupSlots(), laadMaatwerkSlots()]);
+
+  async function laadPatronen() {
+    const [{ data: makeupPatterns }, { data: maatwerkPatterns }] = await Promise.all([
+      supabase.from('makeup_slot_patterns').select('pattern_id, weekday, start_time, end_time, location, active').eq('active', true).order('weekday'),
+      supabase.from('maatwerk_slot_patterns').select('pattern_id, weekday, start_time, end_time, subjects(name), active').eq('active', true).order('weekday'),
+    ]);
+    $('#makeup-patterns-body').innerHTML = (makeupPatterns || []).length
+      ? makeupPatterns.map((p) => `<tr>
+          <td>${WEEKDAG_LABEL[p.weekday]}</td><td>${p.start_time.slice(0, 5)}-${p.end_time.slice(0, 5)}</td><td>${escapeHtml(p.location || '—')}</td>
+          <td><button class="btn btn-sm btn-ghost" data-deactiveer-makeup-pattern="${p.pattern_id}">Verwijderen</button></td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen vast patroon.</td></tr>`;
+    $('#maatwerk-patterns-body').innerHTML = (maatwerkPatterns || []).length
+      ? maatwerkPatterns.map((p) => `<tr>
+          <td>${WEEKDAG_LABEL[p.weekday]}</td><td>${p.start_time.slice(0, 5)}-${p.end_time.slice(0, 5)}</td><td>${escapeHtml(p.subjects?.name || '—')}</td>
+          <td><button class="btn btn-sm btn-ghost" data-deactiveer-maatwerk-pattern="${p.pattern_id}">Verwijderen</button></td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen vast patroon.</td></tr>`;
+
+    $$('[data-deactiveer-makeup-pattern]').forEach((b) => b.addEventListener('click', async () => {
+      await supabase.from('makeup_slot_patterns').update({ active: false }).eq('pattern_id', b.dataset.deactiveerMakeupPattern);
+      await laadPatronen();
+    }));
+    $$('[data-deactiveer-maatwerk-pattern]').forEach((b) => b.addEventListener('click', async () => {
+      await supabase.from('maatwerk_slot_patterns').update({ active: false }).eq('pattern_id', b.dataset.deactiveerMaatwerkPattern);
+      await laadPatronen();
+    }));
+  }
+
+  // Zet uit elk actief weekpatroon concrete, gedateerde slots voor de
+  // komende 6 weken - dezelfde logica als scheduling/generate-slots
+  // (api/index.ts), hier client-side via RLS i.p.v. het n8n-geheim.
+  // Idempotent: slaat een (pattern_id, starts_at)-combinatie over als
+  // die al bestaat.
+  async function genereerSlots(stil) {
+    const WEKEN_VOORUIT = 6;
+    const vandaag = new Date();
+    vandaag.setHours(0, 0, 0, 0);
+    let makeupAangemaakt = 0;
+    let maatwerkAangemaakt = 0;
+
+    const { data: makeupPatterns } = await supabase.from('makeup_slot_patterns').select('*').eq('active', true);
+    for (const p of makeupPatterns || []) {
+      for (let dag = 0; dag < WEKEN_VOORUIT * 7; dag++) {
+        const datum = new Date(vandaag);
+        datum.setDate(datum.getDate() + dag);
+        const isoWeekdag = ((datum.getDay() + 6) % 7) + 1;
+        if (isoWeekdag !== p.weekday) continue;
+        const dagStr = datum.toISOString().slice(0, 10);
+        const startsAt = new Date(`${dagStr}T${p.start_time}`);
+        const endsAt = new Date(`${dagStr}T${p.end_time}`);
+        if (startsAt < new Date()) continue;
+        const { data: bestaand } = await supabase.from('makeup_slots').select('makeup_slot_id').eq('pattern_id', p.pattern_id).eq('starts_at', startsAt.toISOString()).maybeSingle();
+        if (bestaand) continue;
+        const { error } = await supabase.from('makeup_slots').insert({
+          school_id: p.school_id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(),
+          location: p.location, supervisor_profile_id: p.supervisor_profile_id, capacity: p.capacity, pattern_id: p.pattern_id,
+        });
+        if (!error) makeupAangemaakt++;
+      }
+    }
+
+    const { data: maatwerkPatterns } = await supabase.from('maatwerk_slot_patterns').select('*').eq('active', true);
+    for (const p of maatwerkPatterns || []) {
+      for (let dag = 0; dag < WEKEN_VOORUIT * 7; dag++) {
+        const datum = new Date(vandaag);
+        datum.setDate(datum.getDate() + dag);
+        const isoWeekdag = ((datum.getDay() + 6) % 7) + 1;
+        if (isoWeekdag !== p.weekday) continue;
+        const dagStr = datum.toISOString().slice(0, 10);
+        const startsAt = new Date(`${dagStr}T${p.start_time}`);
+        const endsAt = new Date(`${dagStr}T${p.end_time}`);
+        if (startsAt < new Date()) continue;
+        const { data: bestaand } = await supabase.from('maatwerk_slots').select('maatwerk_slot_id').eq('pattern_id', p.pattern_id).eq('starts_at', startsAt.toISOString()).maybeSingle();
+        if (bestaand) continue;
+        const { error } = await supabase.from('maatwerk_slots').insert({
+          school_id: p.school_id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(),
+          subject_id: p.subject_id, teacher_profile_id: p.teacher_profile_id, capacity: p.capacity, pattern_id: p.pattern_id,
+        });
+        if (!error) maatwerkAangemaakt++;
+      }
+    }
+
+    if (!stil) toast(`${makeupAangemaakt} inhaalmomenten + ${maatwerkAangemaakt} maatwerkmomenten aangemaakt.`, 'good');
+    await Promise.all([laadMakeupSlots(), laadMaatwerkSlots()]);
+  }
 
   async function laadMakeupSlots() {
     const { data: slots, error } = await supabase

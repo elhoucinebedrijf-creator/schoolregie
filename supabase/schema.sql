@@ -138,6 +138,24 @@ create table tests (
 );
 create index if not exists idx_tests_school on tests(school_id);
 
+-- Fase 8: vaste, wekelijks terugkerende inhaalmomenten. Een pattern is de
+-- sjabloon ("elke dinsdag 14:00-15:00"); scheduling/generate-slots zet
+-- daar concrete makeup_slots-rijen (met een echte datum) van neer voor de
+-- komende weken - de patroon-tabel wordt zelf nooit direct ingepland.
+create table makeup_slot_patterns (
+  pattern_id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references schools(school_id) on delete cascade,
+  weekday int not null check (weekday between 1 and 7), -- 1=maandag..7=zondag
+  start_time time not null,
+  end_time time not null,
+  location text,
+  supervisor_profile_id uuid references profiles(id) on delete set null,
+  capacity int not null default 3,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_makeup_slot_patterns_school on makeup_slot_patterns(school_id);
+
 create table makeup_slots (
   makeup_slot_id uuid primary key default gen_random_uuid(),
   school_id uuid not null references schools(school_id) on delete cascade,
@@ -146,6 +164,7 @@ create table makeup_slots (
   location text,
   supervisor_profile_id uuid references profiles(id) on delete set null,
   capacity int not null default 1,
+  pattern_id uuid references makeup_slot_patterns(pattern_id) on delete set null,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_makeup_slots_school on makeup_slots(school_id);
@@ -231,6 +250,20 @@ create table interventions (
 create index if not exists idx_interventions_school on interventions(school_id);
 create index if not exists idx_interventions_student on interventions(student_id);
 
+create table maatwerk_slot_patterns (
+  pattern_id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references schools(school_id) on delete cascade,
+  weekday int not null check (weekday between 1 and 7),
+  start_time time not null,
+  end_time time not null,
+  subject_id uuid references subjects(subject_id) on delete set null,
+  teacher_profile_id uuid references profiles(id) on delete set null,
+  capacity int not null default 4,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_maatwerk_slot_patterns_school on maatwerk_slot_patterns(school_id);
+
 create table maatwerk_slots (
   maatwerk_slot_id uuid primary key default gen_random_uuid(),
   school_id uuid not null references schools(school_id) on delete cascade,
@@ -239,6 +272,7 @@ create table maatwerk_slots (
   starts_at timestamptz,
   ends_at timestamptz,
   capacity int not null default 1,
+  pattern_id uuid references maatwerk_slot_patterns(pattern_id) on delete set null,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_maatwerk_slots_school on maatwerk_slots(school_id);
@@ -298,6 +332,12 @@ create table communications (
   school_id uuid not null references schools(school_id) on delete cascade,
   student_id uuid references students(student_id) on delete set null,
   guardian_id uuid references guardians(guardian_id) on delete set null,
+  -- Fase 8: generaliseert deze tabel van "alleen ouder/leerling" naar
+  -- "iedereen" - staff-meldingen (docent/mentor/teamleider/
+  -- zorgcoordinator) zetten dit i.p.v. student_id/guardian_id. Precies
+  -- één van de drie hoort gezet te zijn (niet als constraint afgedwongen,
+  -- wel als conventie - zie communications/pending in api/index.ts).
+  recipient_profile_id uuid references profiles(id) on delete set null,
   channel text check (channel in ('email','sms','app','whatsapp')),
   template_key text,
   subject text,
@@ -505,6 +545,8 @@ alter table audit_logs enable row level security;
 alter table integrations enable row level security;
 alter table imports enable row level security;
 alter table notification_templates enable row level security;
+alter table makeup_slot_patterns enable row level security;
+alter table maatwerk_slot_patterns enable row level security;
 
 -- schools/profiles: eigen school zien, profiel zelf bijwerken.
 create policy schools_select on schools for select
@@ -616,3 +658,16 @@ create policy conversations_own_select on conversations for select
 
 create policy communications_own_select on communications for select
   using (student_id is not null and is_own_student(student_id));
+
+-- === Fase 8: vaste roosterpatronen (staff-CRUD, buiten de generieke loop
+-- gehouden om deze twee nieuwe tabellen expliciet te documenteren) =========
+
+create policy makeup_slot_patterns_staff_select on makeup_slot_patterns for select using (school_id = current_school_id() and is_staff());
+create policy makeup_slot_patterns_staff_insert on makeup_slot_patterns for insert with check (school_id = current_school_id() and is_staff());
+create policy makeup_slot_patterns_staff_update on makeup_slot_patterns for update using (school_id = current_school_id() and is_staff());
+create policy makeup_slot_patterns_staff_delete on makeup_slot_patterns for delete using (school_id = current_school_id() and is_staff());
+
+create policy maatwerk_slot_patterns_staff_select on maatwerk_slot_patterns for select using (school_id = current_school_id() and is_staff());
+create policy maatwerk_slot_patterns_staff_insert on maatwerk_slot_patterns for insert with check (school_id = current_school_id() and is_staff());
+create policy maatwerk_slot_patterns_staff_update on maatwerk_slot_patterns for update using (school_id = current_school_id() and is_staff());
+create policy maatwerk_slot_patterns_staff_delete on maatwerk_slot_patterns for delete using (school_id = current_school_id() and is_staff());

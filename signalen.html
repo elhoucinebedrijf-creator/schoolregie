@@ -201,6 +201,10 @@
             description: explanation, owner_profile_id: student.mentor_profile_id,
             related_student_id: studentId, related_type: 'signal', related_id: signal.signal_id, status: 'nieuw',
           });
+          await supabase.from('communications').insert({
+            school_id: profile.school_id, student_id: studentId, recipient_profile_id: student.mentor_profile_id,
+            channel: 'email', template_key: 'signal_mentor_notice', subject: `Groot signaal: ${student.full_name}`, body: explanation, status: 'nieuw',
+          });
           await supabase.from('conversations').insert({
             school_id: profile.school_id, student_id: studentId, kind: 'oudergesprek', proposed_by: profile.id, status: 'nieuw',
           });
@@ -228,11 +232,24 @@
       const btn = $('#dm-submit');
       setLoading(btn, true, 'Bezig…');
       try {
-        const { error } = await supabase.from('conversations').update({
-          scheduled_at: new Date($('#dm-datetime').value).toISOString(), status: 'gepland',
-        }).eq('conversation_id', $('#dm-conversation-id').value);
+        const conversationId = $('#dm-conversation-id').value;
+        const startsAt = new Date($('#dm-datetime').value).toISOString();
+        const { data: conversation, error } = await supabase.from('conversations').update({
+          scheduled_at: startsAt, status: 'gepland',
+        }).eq('conversation_id', conversationId).select('student_id, students(full_name, mentor_profile_id)').single();
         if (error) throw error;
-        toast('Datum/tijd voorgesteld.', 'good');
+
+        const wanneer = new Date(startsAt).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+        const naam = conversation.students?.full_name || '';
+        const subject = `Oudergesprek voorgesteld: ${naam}`;
+        const body = `Er is een gesprek over ${naam} voorgesteld op ${wanneer}. Bevestig dit in SchoolRegie.`;
+        const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', conversation.student_id);
+        for (const g of guardianLinks || []) {
+          await supabase.from('communications').insert({ school_id: profile.school_id, student_id: conversation.student_id, guardian_id: g.guardian_id, channel: 'email', template_key: 'parent_conversation_proposed', subject, body, status: 'nieuw' });
+        }
+        await supabase.from('communications').insert({ school_id: profile.school_id, student_id: conversation.student_id, channel: 'email', template_key: 'parent_conversation_proposed', subject, body, status: 'nieuw' });
+
+        toast('Datum/tijd voorgesteld en ouder(s) geïnformeerd.', 'good');
         closeModal('#datum-modal');
         await laadGesprekken();
       } catch (err) {
