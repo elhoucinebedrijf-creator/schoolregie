@@ -39,7 +39,7 @@
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:10px;">
         <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
-        <div class="topbar-title"><h1>Surveillance - vandaag</h1></div>
+        <div class="topbar-title"><h1>Surveillance</h1></div>
       </div>
       <div class="topbar-right">
         <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
@@ -48,7 +48,7 @@
     </div>
 
     <div class="content">
-      <p class="hint" style="margin-bottom:14px;">Bij "Niet verschenen" wordt automatisch een nieuwe inhaalpoging klaargezet - tenzij dit al de 2e keer is, dan gaat er in plaats daarvan een kritiek signaal naar de mentor/zorgcoördinator.</p>
+      <p class="hint" style="margin-bottom:14px;">Vandaag en de komende 14 dagen. Bij "Niet verschenen" wordt automatisch een nieuwe inhaalpoging klaargezet - tenzij dit al de 2e keer is, dan gaat er in plaats daarvan een kritiek signaal naar de mentor/zorgcoördinator.</p>
       <div id="slots-list"></div>
     </div>
   </div>
@@ -56,7 +56,7 @@
 
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
-  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError, printDocument } from '/assets/ui.js';
 
   const MODULE_ROLLEN = ['administrator', 'surveillant'];
   const ctx = await requireUser(MODULE_ROLLEN);
@@ -71,39 +71,70 @@
   await laadSlots();
 
   async function laadSlots() {
+    // Strikt "alleen vandaag" liet de pagina leeg/kapot ogen zodra er
+    // toevallig niets op de kalenderdag van vandaag stond, terwijl er wel
+    // inhaalmomenten in de komende dagen klaarstonden - daarom nu een
+    // venster van vandaag t/m 14 dagen vooruit, gegroepeerd per datum.
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    const rangeEnd = new Date(todayStart); rangeEnd.setDate(rangeEnd.getDate() + 14); rangeEnd.setHours(23, 59, 59, 999);
     let query = supabase
       .from('makeup_slots')
-      .select('makeup_slot_id, starts_at, ends_at, location, makeup_tests(makeup_test_id, status, no_show_count, missed_test_id, missed_tests(student_id, students(full_name)))')
+      .select('makeup_slot_id, starts_at, ends_at, location, makeup_tests(makeup_test_id, status, no_show_count, missed_test_id, document_id, missed_tests(student_id, students(full_name)), test_documents(content, hulpmiddelen))')
       .gte('starts_at', todayStart.toISOString())
-      .lte('starts_at', todayEnd.toISOString())
+      .lte('starts_at', rangeEnd.toISOString())
       .order('starts_at', { ascending: true });
     if (profile.role === 'surveillant') query = query.eq('supervisor_profile_id', profile.id);
     const { data: slots, error } = await query;
     if (error) { $('#slots-list').innerHTML = `<p class="hint">${escapeHtml(friendlyError(error))}</p>`; return; }
 
-    if (!slots || !slots.length) {
-      $('#slots-list').innerHTML = `<p class="hint">Geen inhaalmomenten vandaag.</p>`;
+    // Alleen momenten met daadwerkelijk klaargezette leerlingen tonen -
+    // een leeg moment (nog niemand ingepland) is niets voor de surveillant
+    // om naar te kijken.
+    const metLeerlingen = (slots || []).filter((s) => (s.makeup_tests || []).some((m) => m.status === 'klaargezet_voor_afname'));
+    if (!metLeerlingen.length) {
+      $('#slots-list').innerHTML = `<p class="hint">Geen leerlingen klaargezet voor de komende 14 dagen.</p>`;
       return;
     }
 
-    $('#slots-list').innerHTML = slots.map((slot) => {
-      const klaar = (slot.makeup_tests || []).filter((m) => m.status === 'klaargezet_voor_afname');
-      const rows = klaar.length
-        ? klaar.map((m) => `<tr>
+    const todayKey = todayStart.toISOString().slice(0, 10);
+    const perDatum = new Map();
+    for (const slot of metLeerlingen) {
+      const datumKey = slot.starts_at.slice(0, 10);
+      if (!perDatum.has(datumKey)) perDatum.set(datumKey, []);
+      perDatum.get(datumKey).push(slot);
+    }
+
+    $('#slots-list').innerHTML = [...perDatum.entries()].map(([datumKey, dagSlots]) => {
+      const dagLabel = new Date(datumKey + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long' });
+      const kaarten = dagSlots.map((slot) => {
+        const klaar = (slot.makeup_tests || []).filter((m) => m.status === 'klaargezet_voor_afname');
+        const rows = klaar.map((m) => {
+          const doc = Array.isArray(m.test_documents) ? m.test_documents[0] : m.test_documents;
+          const hulpmiddelen = doc?.hulpmiddelen || 'geen bijzondere hulpmiddelen';
+          return `<tr>
             <td>${escapeHtml(m.missed_tests?.students?.full_name || '—')}</td>
+            <td>${escapeHtml(hulpmiddelen)}</td>
             <td>
+              <button class="btn btn-sm btn-secondary" data-print="${m.makeup_test_id}">Toets afdrukken/PDF</button>
               <button class="btn btn-sm btn-primary" data-afgerond="${m.makeup_test_id}">Aanwezig - afronden</button>
               <button class="btn btn-sm btn-danger" data-noshow="${m.makeup_test_id}" data-missed="${m.missed_test_id}" data-student="${m.missed_tests?.student_id || ''}" data-count="${m.no_show_count}">Niet verschenen</button>
             </td>
-          </tr>`).join('')
-        : `<tr><td colspan="2" style="color:var(--text-muted);">Geen leerlingen klaargezet voor dit moment.</td></tr>`;
-      return `<div class="card" style="margin-bottom:16px;">
-        <div class="card-row"><h3>${formatDateTime(slot.starts_at)} - ${escapeHtml(slot.location || 'geen lokaal')}</h3></div>
-        <div class="table-wrap"><table><thead><tr><th>Leerling</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      </div>`;
+          </tr>`;
+        }).join('');
+        return `<div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>${formatDateTime(slot.starts_at)} - ${escapeHtml(slot.location || 'geen lokaal')}</h3></div>
+          <div class="table-wrap"><table><thead><tr><th>Leerling</th><th>Hulpmiddelen</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+        </div>`;
+      }).join('');
+      const titel = datumKey === todayKey ? `Vandaag - ${dagLabel}` : dagLabel;
+      return `<h3 style="margin:20px 0 4px;">${escapeHtml(titel)}</h3>${kaarten}`;
     }).join('');
+
+    $$('[data-print]').forEach((btn) => btn.addEventListener('click', () => {
+      const mt = slots.flatMap((s) => s.makeup_tests || []).find((m) => m.makeup_test_id === btn.dataset.print);
+      const doc = mt && (Array.isArray(mt.test_documents) ? mt.test_documents[0] : mt.test_documents);
+      printDocument('Inhaaltoets', doc?.content || '(geen toetsinhoud gevonden)', { Leerling: mt?.missed_tests?.students?.full_name || '', Hulpmiddelen: doc?.hulpmiddelen || 'geen' });
+    }));
 
     $$('[data-afgerond]').forEach((btn) => btn.addEventListener('click', async () => {
       setLoading(btn, true, 'Bezig…');

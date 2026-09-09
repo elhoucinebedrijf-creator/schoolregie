@@ -48,19 +48,29 @@
     </div>
 
     <div class="content">
-      <div class="card" style="margin-bottom:16px;">
-        <div class="card-row"><h3>OPP-trajecten</h3><button class="btn btn-primary" id="btn-nieuw-opp">+ OPP-traject starten</button></div>
-        <p class="hint">De AI maakt uitsluitend een concept-samenvatting - de zorgcoördinator neemt altijd het besluit.</p>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Leerling</th><th>Status</th><th>Evaluatie voor</th><th>AI-samenvatting</th><th></th></tr></thead>
-          <tbody id="opp-body"><tr><td colspan="5" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
-        </table></div>
+      <div id="staff-opp-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>OPP-trajecten</h3><button class="btn btn-primary" id="btn-nieuw-opp">+ OPP-traject starten</button></div>
+          <p class="hint">De AI maakt uitsluitend een concept-samenvatting - de zorgcoördinator neemt altijd het besluit.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Status</th><th>Evaluatie voor</th><th>AI-samenvatting</th><th>Ondertekening</th><th></th></tr></thead>
+            <tbody id="opp-body"><tr><td colspan="6" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-row"><h3>Zorgoverleg (MDO) - voorbereide agenda's</h3></div>
+          <p class="hint">Wekelijks automatisch voorbereid op basis van open hoog/kritiek-signalen en lopende OPP-trajecten.</p>
+          <div id="mdo-list"></div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-row"><h3>Zorgoverleg (MDO) - voorbereide agenda's</h3></div>
-        <p class="hint">Wekelijks automatisch voorbereid op basis van open hoog/kritiek-signalen en lopende OPP-trajecten.</p>
-        <div id="mdo-list"></div>
+      <div id="signature-view" hidden>
+        <div class="card">
+          <div class="card-row"><h3>OPP ter ondertekening</h3></div>
+          <p class="hint">Hier staan OPP-plannen waarvoor de zorgcoördinator jouw akkoord vraagt - alleen de samenvatting en de doelen/acties, geen volledig dossier.</p>
+          <div id="signature-list"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -88,18 +98,21 @@
     <div id="samenvatting-body"></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+      <button type="button" class="btn btn-ghost" id="btn-print-opp">Opslaan als PDF</button>
+      <button type="button" class="btn btn-primary" id="btn-versturen">Verstuur voor ondertekening</button>
     </div>
   </div>
 </div>
 
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
-  import { $, $$, escapeHtml, formatDate, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { $, $$, escapeHtml, formatDate, renderTopbar, toast, setLoading, friendlyError, printDocument, generateConfirmToken, confirmTokenExpiry } from '/assets/ui.js';
 
-  const MODULE_ROLLEN = ['administrator', 'zorgcoordinator', 'mentor', 'teamleider'];
+  const MODULE_ROLLEN = ['administrator', 'zorgcoordinator', 'mentor', 'teamleider', 'ouder', 'leerling'];
   const ctx = await requireUser(MODULE_ROLLEN);
   if (!ctx) throw new Error('niet ingelogd');
   const { profile, supabase } = ctx;
+  const isStaff = !['ouder', 'leerling'].includes(profile.role);
 
   renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
   $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
@@ -112,57 +125,73 @@
   const badge = (status) => `<span class="badge badge--${STATUS_TONE[status] || 'neutral'}">${escapeHtml(STATUS_LABEL[status] || status)}</span>`;
   const VOLGENDE_STATUS = { nieuw: 'in_behandeling', in_behandeling: 'goedgekeurd', goedgekeurd: 'afgerond' };
 
-  const { data: students } = await supabase.from('students').select('student_id, full_name').order('full_name');
-  $('#o-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+  if (isStaff) {
+    $('#staff-opp-view').hidden = false;
+    await initStaffOppView();
+  } else {
+    $('#signature-view').hidden = false;
+    await initSignatureView();
+  }
 
-  $('#btn-nieuw-opp').addEventListener('click', () => openModal('#nieuw-modal'));
+  async function initStaffOppView() {
+    const { data: students } = await supabase.from('students').select('student_id, full_name').order('full_name');
+    $('#o-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
 
-  $('#nieuw-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = $('#o-submit');
-    setLoading(btn, true, 'Bezig…');
-    try {
-      const studentId = $('#o-student').value;
-      const reason = $('#o-reason').value.trim();
-      const reviewDueDate = new Date();
-      reviewDueDate.setDate(reviewDueDate.getDate() + 42);
-      const { data: opp, error: e1 } = await supabase.from('opp_plans').insert({
-        school_id: profile.school_id, student_id: studentId, status: 'nieuw', ai_human_review_required: true,
-        started_by: profile.id, review_due_date: reviewDueDate.toISOString().slice(0, 10),
-      }).select('opp_id').single();
-      if (e1) throw e1;
-      await supabase.from('dossier_entries').insert({
-        school_id: profile.school_id, student_id: studentId, entry_type: 'opp_start', related_type: 'opp_plan', related_id: opp.opp_id,
-        summary: reason, author_profile_id: profile.id,
-      });
-      toast('OPP-traject gestart.', 'good');
-      closeModal('#nieuw-modal');
-      e.target.reset();
-      await laadOpp();
-    } catch (err) {
-      toast(friendlyError(err), 'critical');
-    } finally {
-      setLoading(btn, false);
-    }
-  });
+    $('#btn-nieuw-opp').addEventListener('click', () => openModal('#nieuw-modal'));
 
-  await Promise.all([laadOpp(), laadMdo()]);
+    $('#nieuw-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#o-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const studentId = $('#o-student').value;
+        const reason = $('#o-reason').value.trim();
+        const reviewDueDate = new Date();
+        reviewDueDate.setDate(reviewDueDate.getDate() + 42);
+        const { data: opp, error: e1 } = await supabase.from('opp_plans').insert({
+          school_id: profile.school_id, student_id: studentId, status: 'nieuw', ai_human_review_required: true,
+          started_by: profile.id, review_due_date: reviewDueDate.toISOString().slice(0, 10),
+        }).select('opp_id').single();
+        if (e1) throw e1;
+        await supabase.from('dossier_entries').insert({
+          school_id: profile.school_id, student_id: studentId, entry_type: 'opp_start', related_type: 'opp_plan', related_id: opp.opp_id,
+          summary: reason, author_profile_id: profile.id,
+        });
+        toast('OPP-traject gestart.', 'good');
+        closeModal('#nieuw-modal');
+        e.target.reset();
+        await laadOpp();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    await Promise.all([laadOpp(), laadMdo()]);
+  }
 
   async function laadOpp() {
     const { data: rows, error } = await supabase
       .from('opp_plans')
-      .select('opp_id, status, review_due_date, ai_summary, ai_confidence, students(full_name)')
+      .select('opp_id, status, review_due_date, ai_summary, ai_confidence, students(full_name), opp_signatures(signature_id, status)')
       .order('created_at', { ascending: false });
-    if (error) { $('#opp-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    if (error) { $('#opp-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
     $('#opp-body').innerHTML = (rows || []).length
-      ? rows.map((r) => `<tr>
+      ? rows.map((r) => {
+          const sigs = r.opp_signatures || [];
+          const akkoordCount = sigs.filter((s) => s.status === 'akkoord').length;
+          const ondertekening = sigs.length ? `${akkoordCount}/${sigs.length} akkoord` : '—';
+          return `<tr>
           <td>${escapeHtml(r.students?.full_name || '—')}</td>
           <td>${badge(r.status)}</td>
           <td>${formatDate(r.review_due_date)}</td>
           <td>${r.ai_summary ? `<button class="btn btn-sm btn-secondary" data-bekijk="${r.opp_id}">Bekijk (${Math.round((r.ai_confidence || 0) * 100)}%)</button>` : `<button class="btn btn-sm btn-secondary" data-genereer="${r.opp_id}">Genereer samenvatting</button>`}</td>
+          <td>${escapeHtml(ondertekening)}</td>
           <td>${r.status !== 'afgerond' && r.status !== 'geannuleerd' && VOLGENDE_STATUS[r.status] ? `<button class="btn btn-sm btn-primary" data-volgende="${r.opp_id}" data-status="${VOLGENDE_STATUS[r.status]}">${escapeHtml(STATUS_LABEL[VOLGENDE_STATUS[r.status]])}</button>` : ''}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="5" style="color:var(--text-muted);">Nog geen OPP-trajecten.</td></tr>`;
+        </tr>`;
+        }).join('')
+      : `<tr><td colspan="6" style="color:var(--text-muted);">Nog geen OPP-trajecten.</td></tr>`;
 
     $$('[data-genereer]').forEach((btn) => btn.addEventListener('click', async () => {
       setLoading(btn, true, 'AI beoordeelt…');
@@ -184,10 +213,11 @@
   }
 
   async function bekijkOpenen(oppId) {
-    const [{ data: opp }, { data: goals }, { data: actions }] = await Promise.all([
-      supabase.from('opp_plans').select('ai_summary, ai_confidence').eq('opp_id', oppId).maybeSingle(),
+    const [{ data: opp }, { data: goals }, { data: actions }, student] = await Promise.all([
+      supabase.from('opp_plans').select('ai_summary, ai_confidence, student_id').eq('opp_id', oppId).maybeSingle(),
       supabase.from('opp_goals').select('goal_id, description, target_date, status').eq('opp_id', oppId).order('created_at', { ascending: true }),
       supabase.from('opp_actions').select('action_id:opp_action_id, description, due_date, status, profiles(full_name)').eq('opp_id', oppId).order('created_at', { ascending: true }),
+      supabase.from('opp_plans').select('students(full_name, mentor_profile_id)').eq('opp_id', oppId).maybeSingle().then((r) => r.data?.students || null),
     ]);
 
     const doelenHtml = (goals || []).length
@@ -216,10 +246,60 @@
     `;
     openModal('#samenvatting-modal');
 
+    $('#btn-print-opp').onclick = () => printDocument('OPP - concept-samenvatting', opp?.ai_summary || '', { Leerling: student?.full_name || '' });
+
+    $('#btn-versturen').onclick = async () => {
+      const btn = $('#btn-versturen');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        await verstuurVoorOndertekening(oppId, opp?.student_id, student);
+        toast('Verzonden voor ondertekening aan ouder(s), mentor en leerling.', 'good');
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    };
+
     $$('[data-goal-goedkeuren]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_goals').update({ status: 'goedgekeurd' }).eq('goal_id', b.dataset.goalGoedkeuren); await bekijkOpenen(oppId); }));
     $$('[data-goal-afwijzen]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_goals').update({ status: 'geannuleerd' }).eq('goal_id', b.dataset.goalAfwijzen); await bekijkOpenen(oppId); }));
     $$('[data-action-goedkeuren]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_actions').update({ status: 'goedgekeurd' }).eq('opp_action_id', b.dataset.actionGoedkeuren); await bekijkOpenen(oppId); }));
     $$('[data-action-afwijzen]').forEach((b) => b.addEventListener('click', async () => { await supabase.from('opp_actions').update({ status: 'geannuleerd' }).eq('opp_action_id', b.dataset.actionAfwijzen); await bekijkOpenen(oppId); }));
+  }
+
+  // Maakt opp_signatures-verzoeken + communications-meldingen aan voor
+  // ouder(s), mentor en leerling - zelfde "client-side, RLS"-patroon als
+  // de plaatsingsmelding in gemiste-toetsen.html. Ondertekenen zelf gaat
+  // via de smalle edge function `onderteken-opp` (geen brede update-RLS).
+  async function verstuurVoorOndertekening(oppId, studentId, student) {
+    const subject = `OPP ter ondertekening: ${student?.full_name || ''}`;
+    // Elke ontvanger krijgt een eigen token (aparte opp_signatures-rij) -
+    // een link mag alleen precies díe rij kunnen ondertekenen, niet elke
+    // openstaande rij voor dit OPP-plan.
+    const emailBody = (link) => `Er staat een Ontwikkelingsperspectiefplan (OPP) klaar voor ${student?.full_name || 'de leerling'}.\n\nBekijk de samenvatting en geef direct akkoord/niet akkoord, zonder in te loggen:\n${link}\n\n(Of log in op SchoolRegie om het daar te doen.)`;
+
+    const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', studentId);
+    for (const g of guardianLinks || []) {
+      const token = generateConfirmToken();
+      await supabase.from('opp_signatures').insert({ school_id: profile.school_id, opp_id: oppId, signer_type: 'ouder', guardian_id: g.guardian_id, status: 'nieuw', confirm_token: token, confirm_token_expires_at: confirmTokenExpiry() });
+      const body = emailBody(`${window.location.origin}/onderteken.html?token=${token}`);
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, guardian_id: g.guardian_id, channel: 'email', template_key: 'opp_signature_request', subject, body, status: 'nieuw' });
+    }
+
+    const { data: studentProfile } = await supabase.from('students').select('profile_id').eq('student_id', studentId).maybeSingle();
+    if (studentProfile?.profile_id) {
+      const token = generateConfirmToken();
+      await supabase.from('opp_signatures').insert({ school_id: profile.school_id, opp_id: oppId, signer_type: 'leerling', signer_profile_id: studentProfile.profile_id, status: 'nieuw', confirm_token: token, confirm_token_expires_at: confirmTokenExpiry() });
+      const body = emailBody(`${window.location.origin}/onderteken.html?token=${token}`);
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, recipient_profile_id: studentProfile.profile_id, channel: 'email', template_key: 'opp_signature_request', subject, body, status: 'nieuw' });
+    }
+
+    if (student?.mentor_profile_id) {
+      const token = generateConfirmToken();
+      await supabase.from('opp_signatures').insert({ school_id: profile.school_id, opp_id: oppId, signer_type: 'mentor', signer_profile_id: student.mentor_profile_id, status: 'nieuw', confirm_token: token, confirm_token_expires_at: confirmTokenExpiry() });
+      const body = emailBody(`${window.location.origin}/onderteken.html?token=${token}`);
+      await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, recipient_profile_id: student.mentor_profile_id, channel: 'email', template_key: 'opp_signature_request', subject, body, status: 'nieuw' });
+    }
   }
 
   async function laadMdo() {
@@ -242,6 +322,51 @@
     $$('[data-mdo-afgerond]').forEach((btn) => btn.addEventListener('click', async () => {
       await supabase.from('tasks').update({ status: 'afgerond' }).eq('task_id', btn.dataset.mdoAfgerond);
       await laadMdo();
+    }));
+  }
+
+  async function initSignatureView() {
+    const { data: sigs, error } = await supabase
+      .from('opp_signatures')
+      .select('signature_id, signer_type, status, signed_at, signed_name, opp_plans(opp_id, ai_summary, student_id, students(full_name))')
+      .order('created_at', { ascending: false });
+    if (error) { $('#signature-list').innerHTML = `<p class="hint">${escapeHtml(friendlyError(error))}</p>`; return; }
+    if (!sigs || !sigs.length) { $('#signature-list').innerHTML = `<p class="hint">Er staat op dit moment niets voor je klaar om te ondertekenen.</p>`; return; }
+
+    const cards = [];
+    for (const s of sigs) {
+      const opp = s.opp_plans;
+      let goalsHtml = '<p class="hint">Geen doelen beschikbaar.</p>';
+      if (opp?.opp_id) {
+        const { data: goals } = await supabase.from('opp_goals').select('description, target_date').eq('opp_id', opp.opp_id).eq('status', 'goedgekeurd').order('created_at', { ascending: true });
+        if (goals && goals.length) {
+          goalsHtml = '<ul>' + goals.map((g) => `<li>${escapeHtml(g.description)} (streefdatum: ${formatDate(g.target_date)})</li>`).join('') + '</ul>';
+        }
+      }
+      cards.push(`<div class="card" style="margin-bottom:12px;">
+        <div class="card-row"><h4>${escapeHtml(opp?.students?.full_name || '')}</h4>${s.status === 'akkoord' ? '<span class="badge badge--good">Ondertekend</span>' : '<span class="badge badge--warn">Wacht op jouw akkoord</span>'}</div>
+        <div class="field"><textarea rows="6" readonly>${escapeHtml(opp?.ai_summary || '')}</textarea></div>
+        <h4 style="margin-top:12px;">Doelen</h4>
+        ${goalsHtml}
+        ${s.status === 'akkoord'
+          ? `<p class="hint">Ondertekend door ${escapeHtml(s.signed_name || '')} op ${formatDate(s.signed_at)}.</p>`
+          : `<div class="field"><label for="naam-${s.signature_id}">Jouw naam (voor ondertekening)</label><input id="naam-${s.signature_id}" value="${escapeHtml(profile.full_name)}" /></div>
+             <button class="btn btn-sm btn-primary" data-onderteken="${s.signature_id}">Ik heb dit gelezen en ga akkoord</button>`}
+      </div>`);
+    }
+    $('#signature-list').innerHTML = cards.join('');
+
+    $$('[data-onderteken]').forEach((btn) => btn.addEventListener('click', async () => {
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const signedName = $(`#naam-${btn.dataset.onderteken}`)?.value.trim() || profile.full_name;
+        await invokeFunction('onderteken-opp', { signatureId: btn.dataset.onderteken, signedName });
+        toast('Bedankt - je akkoord is geregistreerd.', 'good');
+        await initSignatureView();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+        setLoading(btn, false);
+      }
     }));
   }
 </script>

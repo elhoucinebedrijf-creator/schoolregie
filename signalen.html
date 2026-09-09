@@ -146,7 +146,7 @@
 
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
-  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError, generateConfirmToken, confirmTokenExpiry } from '/assets/ui.js';
 
   const MODULE_ROLLEN = ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator', 'ouder'];
   const ctx = await requireUser(MODULE_ROLLEN);
@@ -235,15 +235,21 @@
       try {
         const conversationId = $('#dm-conversation-id').value;
         const startsAt = new Date($('#dm-datetime').value).toISOString();
+        const token = generateConfirmToken();
         const { data: conversation, error } = await supabase.from('conversations').update({
-          scheduled_at: startsAt, status: 'gepland',
+          scheduled_at: startsAt, status: 'gepland', confirm_token: token, confirm_token_expires_at: confirmTokenExpiry(),
         }).eq('conversation_id', conversationId).select('student_id, students(full_name, mentor_profile_id)').single();
         if (error) throw error;
 
         const wanneer = new Date(startsAt).toLocaleString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
         const naam = conversation.students?.full_name || '';
+        const bevestigLink = `${window.location.origin}/bevestig.html?token=${token}`;
         const subject = `Oudergesprek voorgesteld: ${naam}`;
-        const body = `Er is een gesprek over ${naam} voorgesteld op ${wanneer}. Bevestig dit in SchoolRegie.`;
+        // Bewust een gewone URL in platte tekst (n8n's e-mail-node staat op
+        // emailFormat:'text', zie de README-toelichting over die eerdere
+        // bug) i.p.v. een "knop" - een link werkt in elke mailclient en de
+        // echte akkoord/afwijzen-knoppen staan op de publieke pagina zelf.
+        const body = `Er is een gesprek over ${naam} voorgesteld op ${wanneer}.\n\nBevestig of wijs dit voorgestelde moment direct af, zonder in te loggen:\n${bevestigLink}\n\n(Of log in op SchoolRegie om het daar te bevestigen.)`;
         const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', conversation.student_id);
         for (const g of guardianLinks || []) {
           await supabase.from('communications').insert({ school_id: profile.school_id, student_id: conversation.student_id, guardian_id: g.guardian_id, channel: 'email', template_key: 'parent_conversation_proposed', subject, body, status: 'nieuw' });

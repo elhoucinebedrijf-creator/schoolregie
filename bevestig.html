@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Oudergesprek bevestigen - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+  <div class="center-page">
+    <div class="auth-card">
+      <div class="brand-lockup">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+        <div class="name">SchoolRegie</div>
+      </div>
+      <div class="card" id="content">
+        <p>Bezig met laden…</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const cfg = window.SUPABASE_CONFIG || {};
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const FN_URL = `${cfg.url}/functions/v1/openbare-bevestiging`;
+
+    function formatDateTime(value) {
+      if (!value) return 'nog geen moment voorgesteld';
+      const d = new Date(value);
+      return d.toLocaleDateString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) + ' om ' +
+        d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    const el = document.getElementById('content');
+
+    function toonFout(reason) {
+      el.innerHTML = `<h1 style="font-size:1.15rem;margin-bottom:8px;">Link niet geldig</h1><p>${reason || 'Deze link is niet (meer) geldig.'}</p>`;
+    }
+
+    async function laden() {
+      if (!token) { toonFout('Er ontbreekt een token in de link.'); return; }
+      try {
+        const res = await fetch(`${FN_URL}?type=gesprek&token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+        if (!data.valid) { toonFout(data.reason); return; }
+        el.innerHTML = `
+          <h1 style="font-size:1.15rem;margin-bottom:8px;">Oudergesprek bevestigen</h1>
+          <p style="margin-bottom:14px;">Voor <strong>${escapeHtml(data.studentNaam)}</strong> is een gesprek voorgesteld op:</p>
+          <p style="margin-bottom:18px;font-size:1.05rem;"><strong>${escapeHtml(formatDateTime(data.voorgesteldMoment))}</strong></p>
+          <button class="btn btn-primary btn-block" id="btn-akkoord" style="margin-bottom:8px;">Ja, dit moment past</button>
+          <button class="btn btn-secondary btn-block" id="btn-afwijzen">Nee, ik heb een ander moment nodig</button>
+          <p id="foutmelding" class="error-text" hidden></p>
+        `;
+        document.getElementById('btn-akkoord').addEventListener('click', () => versturen('akkoord'));
+        document.getElementById('btn-afwijzen').addEventListener('click', () => versturen('afwijzen'));
+      } catch (err) {
+        toonFout('Er ging iets mis bij het laden. Probeer het later opnieuw.');
+      }
+    }
+
+    async function versturen(actie) {
+      const buttons = el.querySelectorAll('button');
+      buttons.forEach((b) => { b.disabled = true; });
+      try {
+        const res = await fetch(FN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'gesprek', token, actie }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Onbekende fout');
+        el.innerHTML = actie === 'akkoord'
+          ? `<h1 style="font-size:1.15rem;margin-bottom:8px;">Bedankt!</h1><p>Je hebt bevestigd dat het voorgestelde moment past. De school heeft dit ontvangen.</p>`
+          : `<h1 style="font-size:1.15rem;margin-bottom:8px;">Doorgegeven</h1><p>De mentor is op de hoogte gebracht en stelt een nieuw moment voor.</p>`;
+      } catch (err) {
+        buttons.forEach((b) => { b.disabled = false; });
+        const foutEl = document.getElementById('foutmelding');
+        if (foutEl) { foutEl.hidden = false; foutEl.textContent = 'Er ging iets mis - probeer het opnieuw.'; }
+      }
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    laden();
+  </script>
+</body>
+</html>

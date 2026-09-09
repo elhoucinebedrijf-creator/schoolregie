@@ -565,9 +565,14 @@ declare
   t text;
   -- conversation_notes/opp_goals/opp_actions bewust weggelaten: die hebben
   -- geen eigen school_id-kolom en krijgen hun eigen subquery-policy verderop.
+  -- test_documents zit hier bewust NIET meer in (Fase 9) - die tabel heeft
+  -- eigen, rolspecifieke policies gekregen (alleen vakdocent/administrator
+  -- volledig, surveillant alleen lezen op goedgekeurde rijen) i.p.v. de
+  -- brede is_staff()-toegang die hier ook mentor/teamleider/directie/etc.
+  -- toetsinhoud zou laten lezen.
   staff_tables text[] := array[
     'school_settings','classes','subjects','students','guardians','courses',
-    'tests','makeup_slots','test_documents','missed_tests','makeup_tests',
+    'tests','makeup_slots','missed_tests','makeup_tests',
     'attendance_events','interventions','maatwerk_slots','maatwerk_assignments',
     'signals','tasks','communications','conversations',
     'opp_plans','dossier_entries','audit_logs',
@@ -627,12 +632,9 @@ create policy missed_tests_own_select on missed_tests for select
 create policy makeup_tests_own_select on makeup_tests for select
   using (exists (select 1 from missed_tests mt where mt.missed_test_id = makeup_tests.missed_test_id and is_own_student(mt.student_id)));
 
-create policy test_documents_own_select on test_documents for select
-  using (exists (
-    select 1 from makeup_tests mkt
-    join missed_tests mt on mt.missed_test_id = mkt.missed_test_id
-    where mkt.document_id = test_documents.document_id and is_own_student(mt.student_id) and test_documents.status = 'goedgekeurd'
-  ));
+-- test_documents_own_select is in Fase 9 volledig verwijderd - een
+-- leerling/ouder mag de toetsinhoud NOOIT zien, ook niet na goedkeuring.
+-- Zie de Fase 9-sectie onderaan voor de vervangende RLS.
 
 -- === Fase 2: ouder/leerling-zicht op eigen verzuim/maatwerk ===================
 -- signals blijft bewust buiten dit zicht (escalatie-detail is Fase 3-terrein).
@@ -671,3 +673,143 @@ create policy maatwerk_slot_patterns_staff_select on maatwerk_slot_patterns for 
 create policy maatwerk_slot_patterns_staff_insert on maatwerk_slot_patterns for insert with check (school_id = current_school_id() and is_staff());
 create policy maatwerk_slot_patterns_staff_update on maatwerk_slot_patterns for update using (school_id = current_school_id() and is_staff());
 create policy maatwerk_slot_patterns_staff_delete on maatwerk_slot_patterns for delete using (school_id = current_school_id() and is_staff());
+
+-- === Fase 9: toetsinhoud afschermen + upload + OPP-ondertekening ==========
+-- Kritieke correctie: leerling/ouder/mentor mogen toetsinhoud NOOIT zien
+-- (leerling krijgt de toets alleen op papier tijdens het inhaalmoment).
+-- Alleen vakdocent/administrator hebben volledige CRUD; surveillant mag
+-- alleen lezen, en alleen goedgekeurde documenten (nodig om af te
+-- drukken/af te nemen).
+
+alter table test_documents add column if not exists hulpmiddelen text;
+
+create policy test_documents_docent_admin_select on test_documents for select
+  using (school_id = current_school_id() and current_rol() in ('vakdocent', 'administrator'));
+create policy test_documents_docent_admin_insert on test_documents for insert
+  with check (school_id = current_school_id() and current_rol() in ('vakdocent', 'administrator'));
+create policy test_documents_docent_admin_update on test_documents for update
+  using (school_id = current_school_id() and current_rol() in ('vakdocent', 'administrator'));
+create policy test_documents_docent_admin_delete on test_documents for delete
+  using (school_id = current_school_id() and current_rol() in ('vakdocent', 'administrator'));
+
+create policy test_documents_surveillant_select on test_documents for select
+  using (school_id = current_school_id() and current_rol() = 'surveillant' and status = 'goedgekeurd');
+
+-- Storage-bucket voor de verplichte originele-toets-upload. Pad-conventie:
+-- {school_id}/... - policies scopen op zowel rol als het school_id-prefix
+-- in het pad, zodat een vakdocent nooit bestanden van een andere school
+-- kan lezen/schrijven.
+insert into storage.buckets (id, name, public)
+values ('toetsbank', 'toetsbank', false)
+on conflict (id) do nothing;
+
+create policy toetsbank_docent_admin_all on storage.objects for all
+  using (
+    bucket_id = 'toetsbank'
+    and (select role from profiles where id = auth.uid()) in ('vakdocent', 'administrator')
+    and (storage.foldername(name))[1] = (select school_id::text from profiles where id = auth.uid())
+  )
+  with check (
+    bucket_id = 'toetsbank'
+    and (select role from profiles where id = auth.uid()) in ('vakdocent', 'administrator')
+    and (storage.foldername(name))[1] = (select school_id::text from profiles where id = auth.uid())
+  );
+
+create policy toetsbank_surveillant_select on storage.objects for select
+  using (
+    bucket_id = 'toetsbank'
+    and (select role from profiles where id = auth.uid()) = 'surveillant'
+    and (storage.foldername(name))[1] = (select school_id::text from profiles where id = auth.uid())
+  );
+
+-- OPP-ondertekening: digitaal akkoord van ouder/mentor/leerling. Mentor
+-- heeft al volledige OPP-toegang via de bestaande is_staff()-policy
+-- (opp_plans_staff_*) - deze nieuwe tabel/policies zijn vooral voor
+-- ouder/leerling, die tot nu toe NUL OPP-toegang hadden.
+create table if not exists opp_signatures (
+  signature_id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references schools(school_id) on delete cascade,
+  opp_id uuid not null references opp_plans(opp_id) on delete cascade,
+  signer_type text not null check (signer_type in ('ouder', 'mentor', 'leerling')),
+  signer_profile_id uuid references profiles(id) on delete set null,
+  guardian_id uuid references guardians(guardian_id) on delete set null,
+  status text not null default 'nieuw',
+  signed_name text,
+  signed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_opp_signatures_opp on opp_signatures(opp_id);
+alter table opp_signatures enable row level security;
+
+create policy opp_signatures_staff on opp_signatures for all
+  using (is_staff() and school_id = current_school_id())
+  with check (is_staff() and school_id = current_school_id());
+
+-- LET OP: guardians heeft zelf RLS die alleen is_staff() toestaat, dus een
+-- rechtstreekse subquery op guardians binnen een ouder-gerichte policy
+-- geeft altijd 0 rijen terug (RLS geldt ook binnen policy-subqueries op
+-- andere tabellen) - eerste versie van deze policies had precies deze bug.
+-- is_own_student() ontweek dit al met security definer; dezelfde
+-- oplossing hier via is_own_guardian().
+create or replace function is_own_guardian(p_guardian_id uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from guardians g where g.guardian_id = p_guardian_id and g.profile_id = auth.uid()
+  );
+$$;
+
+create policy opp_signatures_own_select on opp_signatures for select
+  using (
+    signer_profile_id = auth.uid()
+    or is_own_guardian(guardian_id)
+  );
+
+-- Ouder/leerling zien een OPP-plan (samenvatting + doelen/acties) alleen
+-- zodra er een ondertekenverzoek voor hen openstaat - geen algemeen
+-- dossierinzicht, en geen toegang vóórdat de zorgcoördinator dit expliciet
+-- verstuurt via "Verstuur voor ondertekening".
+create policy opp_plans_signature_select on opp_plans for select
+  using (exists (
+    select 1 from opp_signatures sig
+    where sig.opp_id = opp_plans.opp_id
+      and (sig.signer_profile_id = auth.uid() or is_own_guardian(sig.guardian_id))
+  ));
+
+create policy opp_goals_signature_select on opp_goals for select
+  using (exists (
+    select 1 from opp_signatures sig
+    where sig.opp_id = opp_goals.opp_id
+      and (sig.signer_profile_id = auth.uid() or is_own_guardian(sig.guardian_id))
+  ));
+
+create policy opp_actions_signature_select on opp_actions for select
+  using (exists (
+    select 1 from opp_signatures sig
+    where sig.opp_id = opp_actions.opp_id
+      and (sig.signer_profile_id = auth.uid() or is_own_guardian(sig.guardian_id))
+  ));
+
+-- === Fase 10: magic-link e-mailbevestigingen + herinneringen-cadans =======
+-- confirm_token/confirm_token_expires_at: eenmalig bruikbare, tijdelijke
+-- token waarmee iemand ZONDER in te loggen rechtstreeks vanuit een e-mail
+-- kan reageren (akkoord/afwijzen) - de publieke edge function
+-- `openbare-bevestiging` valideert dit token en zet het na gebruik op
+-- null. Geen nieuwe RLS nodig: deze kolommen zijn gewoon onderdeel van de
+-- bestaande rij en volgen de bestaande policies; de publieke functie werkt
+-- met de service-role, niet met RLS.
+alter table conversations add column if not exists confirm_token text;
+alter table conversations add column if not exists confirm_token_expires_at timestamptz;
+alter table conversations add column if not exists last_reminded_at timestamptz;
+
+alter table opp_signatures add column if not exists confirm_token text;
+alter table opp_signatures add column if not exists confirm_token_expires_at timestamptz;
+alter table opp_signatures add column if not exists rejection_reason text;
+alter table opp_signatures add column if not exists last_reminded_at timestamptz;
+
+alter table tasks add column if not exists last_reminded_at timestamptz;
+alter table interventions add column if not exists last_reminded_at timestamptz;
+
+create index if not exists idx_conversations_confirm_token on conversations(confirm_token) where confirm_token is not null;
+create index if not exists idx_opp_signatures_confirm_token on opp_signatures(confirm_token) where confirm_token is not null;

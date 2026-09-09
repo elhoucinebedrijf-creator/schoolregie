@@ -57,23 +57,30 @@ async function handleMissedTests(req: Request, admin: Admin) {
   return json({ ok: true, missedTestId: missedTest.missed_test_id, makeupTestId: makeupTest.makeup_test_id, studentId, status: 'nieuw' });
 }
 
-async function genereerInhaaltoetsMetClaude(input: { subject: string; level: string; learningObjectives: string; originalTestText: string }) {
+async function genereerInhaaltoetsMetClaude(input: { subject: string; level: string; learningObjectives: string; originalTestText: string; feedback?: string }) {
   const system = `Je bent een ervaren toetsontwikkelaar in het Nederlandse voortgezet onderwijs. Je maakt een gelijkwaardige inhaaltoets (zelfde niveau en moeilijkheidsgraad als de originele toets, maar andere vraagstelling zodat een leerling hem niet uit het hoofd kan overnemen) plus een bijbehorend antwoordmodel. Dit concept wordt pas gebruikt na goedkeuring door de vakdocent.
 
+WISKUNDETAAL (verplicht, ook bij andere vakken die rekenen/eenheden gebruiken): gebruik ALTIJD correcte wiskundige notatie met Unicode-tekens, nooit ASCII-benaderingen. Dus √25 (niet sqrt(25) of wortel(25)), x² en x³ (niet x^2), ½ en ¾, π, ≤, ≥, ≠, ° voor graden. Bij een figuur, grafiek of tekening die je niet kunt tekenen: beschrijf die woordelijk en volledig genoeg dat een leerling zonder de afbeelding de vraag toch kan begrijpen.
+
+HULPMIDDELEN: geef ook aan wat de leerling nodig heeft en wat toegestaan is tijdens het inhaalmoment (bijv. rekenmachine, geodriehoek, BINAS, formulekaart) - dit is bedoeld voor de surveillant, niet voor de leerling vooraf.
+
 Antwoord UITSLUITEND met geldige JSON, geen markdown-opmaak, in exact deze vorm:
-{"vragen": "de volledige inhaaltoets als platte tekst", "antwoordmodel": "het volledige antwoordmodel als platte tekst", "confidence": 0.0 tot 1.0, "reden": "korte onderbouwing van je aanpak en confidence-score, in het Nederlands"}`;
+{"vragen": "de volledige inhaaltoets als platte tekst, met correcte wiskundenotatie", "antwoordmodel": "het volledige antwoordmodel als platte tekst", "hulpmiddelen": "wat nodig/toegestaan is als hulpmiddel, of \\"geen\\" als er niets nodig is", "confidence": 0.0 tot 1.0, "reden": "korte onderbouwing van je aanpak en confidence-score, in het Nederlands"}`;
 
   const user = `Vak: ${input.subject || 'onbekend'}
 Niveau: ${input.level || 'onbekend'}
 Leerdoelen: ${input.learningObjectives || 'niet opgegeven'}
 
 Originele toets:
-${input.originalTestText || '(geen originele toetstekst meegegeven - baseer de inhaaltoets dan uitsluitend op vak, niveau en leerdoelen, en verlaag de confidence-score.)'}`;
+${input.originalTestText || '(geen originele toetstekst meegegeven - baseer de inhaaltoets dan uitsluitend op vak, niveau en leerdoelen, en verlaag de confidence-score.)'}
+${input.feedback ? `\nDe vakdocent heeft het vorige concept afgekeurd met deze aanwijzingen - verwerk dit expliciet in een nieuwe versie:\n${input.feedback}` : ''}`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 4000, system, messages: [{ role: 'user', content: user }] }),
+    // 8000 i.p.v. 4000 (Fase 9) - zie toelichting bij dezelfde aanroep in
+    // genereer-inhaaltoets/index.ts.
+    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 8000, system, messages: [{ role: 'user', content: user }] }),
   });
   if (!res.ok) throw new Error(`Claude-aanroep faalde: ${res.status} ${await res.text()}`);
   const data = await res.json();
@@ -102,7 +109,7 @@ async function handleMakeupTestsGenerate(req: Request, admin: Admin) {
     .from('test_documents')
     .insert({
       school_id: missedTest.school_id, test_id: missedTest.test_id, missed_test_id: missedTest.missed_test_id,
-      kind: 'ai_variant', content: generated.vragen || '', status: 'wacht_op_goedkeuring',
+      kind: 'ai_variant', content: generated.vragen || '', hulpmiddelen: generated.hulpmiddelen || null, status: 'wacht_op_goedkeuring',
       ai_confidence: generated.confidence ?? null, ai_human_review_required: true, ai_reason: generated.reden || null, ai_data_used: dataUsed,
     })
     .select('document_id')
@@ -179,22 +186,45 @@ async function handleTasksTeacherReview(req: Request, admin: Admin) {
 
 // === Fase 2: verzuim + maatwerk =================================================
 
+// Herinner-cadans (Fase 10): eerste herinnering na 2 dagen, daarna elke 3
+// dagen zolang iets openstaat - voorkomt zowel een mailbox die dagelijks
+// dezelfde melding herhaalt als dingen die stil blijven liggen.
+function shouldRemind(createdAt: string, lastRemindedAt: string | null): boolean {
+  const now = Date.now();
+  const dag = 24 * 60 * 60 * 1000;
+  if (!lastRemindedAt) return now - new Date(createdAt).getTime() >= 2 * dag;
+  return now - new Date(lastRemindedAt).getTime() >= 3 * dag;
+}
+
 async function handleActionsDue(admin: Admin) {
   const today = new Date().toISOString().slice(0, 10);
-  const [{ data: tasks }, { data: interventions }] = await Promise.all([
-    admin.from('tasks').select('task_id, school_id, title, owner_profile_id, related_student_id, due_date, status').in('status', ['nieuw', 'in_behandeling']),
-    admin.from('interventions').select('intervention_id, school_id, student_id, kind, owner_profile_id, due_date, status'),
+  const [{ data: tasks }, { data: interventions }, { data: conversations }, { data: oppSignatures }] = await Promise.all([
+    admin.from('tasks').select('task_id, school_id, title, owner_profile_id, related_student_id, due_date, status, created_at, last_reminded_at').in('status', ['nieuw', 'in_behandeling']),
+    admin.from('interventions').select('intervention_id, school_id, student_id, kind, owner_profile_id, due_date, status, created_at, last_reminded_at'),
+    admin.from('conversations').select('conversation_id, school_id, student_id, scheduled_at, confirmed_by_guardian, status, created_at, last_reminded_at').eq('status', 'gepland'),
+    admin.from('opp_signatures').select('signature_id, school_id, opp_id, guardian_id, signer_profile_id, status, created_at, last_reminded_at, opp_plans(student_id)').eq('status', 'nieuw'),
   ]);
 
   const actions = [];
   for (const t of tasks || []) {
+    if (!shouldRemind(t.created_at, t.last_reminded_at)) continue;
     const overdue = Boolean(t.due_date && t.due_date < today);
     actions.push({ type: 'task', id: t.task_id, schoolId: t.school_id, title: t.title, ownerProfileId: t.owner_profile_id, studentId: t.related_student_id, dueDate: t.due_date, overdue, priority: overdue ? 'hoog' : 'normaal' });
   }
   for (const i of interventions || []) {
     if (i.status === 'afgerond' || i.status === 'geannuleerd') continue;
+    if (!shouldRemind(i.created_at, i.last_reminded_at)) continue;
     const overdue = Boolean(i.due_date && i.due_date < today);
     actions.push({ type: 'intervention', id: i.intervention_id, schoolId: i.school_id, title: `Interventie (${i.kind})`, ownerProfileId: i.owner_profile_id, studentId: i.student_id, dueDate: i.due_date, overdue, priority: overdue ? 'hoog' : 'normaal' });
+  }
+  for (const c of conversations || []) {
+    if (c.confirmed_by_guardian) continue;
+    if (!shouldRemind(c.created_at, c.last_reminded_at)) continue;
+    actions.push({ type: 'conversation', id: c.conversation_id, schoolId: c.school_id, title: 'Oudergesprek nog niet bevestigd', studentId: c.student_id, dueDate: c.scheduled_at ? c.scheduled_at.slice(0, 10) : null, overdue: false, priority: 'normaal' });
+  }
+  for (const s of oppSignatures || []) {
+    if (!shouldRemind(s.created_at, s.last_reminded_at)) continue;
+    actions.push({ type: 'opp_signature', id: s.signature_id, schoolId: s.school_id, title: 'OPP nog niet ondertekend', guardianId: s.guardian_id, signerProfileId: s.signer_profile_id, studentId: s.opp_plans?.student_id || null, dueDate: null, overdue: false, priority: 'normaal' });
   }
 
   return json({ ok: true, actions, count: actions.length });
@@ -203,14 +233,42 @@ async function handleActionsDue(admin: Admin) {
 async function handleActionsSendReminders(req: Request, admin: Admin) {
   const { actions } = await req.json();
   let verstuurd = 0;
+  const now = new Date().toISOString();
   for (const a of actions || []) {
-    if (!a.ownerProfileId || !a.schoolId) continue;
-    const { error } = await admin.from('communications').insert({
-      school_id: a.schoolId, student_id: a.studentId || null, channel: 'app', template_key: 'open_action_reminder',
-      subject: `Herinnering: openstaande actie${a.overdue ? ' (te laat)' : ''}`,
-      body: `${a.title}${a.dueDate ? ` - deadline: ${a.dueDate}` : ' - geen deadline'}.`, status: 'nieuw',
-    });
-    if (!error) verstuurd++;
+    if (!a.schoolId) continue;
+    const subject = `Herinnering: ${a.title}${a.overdue ? ' (te laat)' : ''}`;
+    const body = `${a.title}${a.dueDate ? ` - deadline: ${a.dueDate}` : ''}.`;
+
+    if (a.type === 'task' || a.type === 'intervention') {
+      if (!a.ownerProfileId) continue;
+      const { error } = await admin.from('communications').insert({
+        school_id: a.schoolId, student_id: a.studentId || null, recipient_profile_id: a.ownerProfileId,
+        channel: 'email', template_key: 'open_action_reminder', subject, body, status: 'nieuw',
+      });
+      if (error) continue;
+      await admin.from(a.type === 'task' ? 'tasks' : 'interventions').update({ last_reminded_at: now }).eq(a.type === 'task' ? 'task_id' : 'intervention_id', a.id);
+      verstuurd++;
+    } else if (a.type === 'conversation') {
+      const { data: guardianLinks } = await admin.from('student_guardians').select('guardian_id').eq('student_id', a.studentId);
+      let sent = false;
+      for (const g of guardianLinks || []) {
+        const { error } = await admin.from('communications').insert({
+          school_id: a.schoolId, student_id: a.studentId, guardian_id: g.guardian_id,
+          channel: 'email', template_key: 'conversation_reminder', subject, body: `${body} Bevestig het voorgestelde moment.`, status: 'nieuw',
+        });
+        if (!error) sent = true;
+      }
+      if (sent) { await admin.from('conversations').update({ last_reminded_at: now }).eq('conversation_id', a.id); verstuurd++; }
+    } else if (a.type === 'opp_signature') {
+      if (!a.guardianId && !a.signerProfileId) continue;
+      const { error } = await admin.from('communications').insert({
+        school_id: a.schoolId, student_id: a.studentId, guardian_id: a.guardianId || null, recipient_profile_id: a.signerProfileId || null,
+        channel: 'email', template_key: 'opp_signature_reminder', subject, body: `${body} Geef akkoord of laat weten dat je nog vragen hebt.`, status: 'nieuw',
+      });
+      if (error) continue;
+      await admin.from('opp_signatures').update({ last_reminded_at: now }).eq('signature_id', a.id);
+      verstuurd++;
+    }
   }
   return json({ ok: true, remindersSent: verstuurd, totalActions: (actions || []).length });
 }
@@ -1063,7 +1121,7 @@ async function handleManagementSendReport(req: Request, admin: Admin) {
 }
 
 async function handleIntegrationsLvsImport(req: Request, admin: Admin) {
-  const { source, students, grades, attendance, schedules } = await req.json();
+  const { source, students, grades, attendance, schedules, classes, subjects, guardians } = await req.json();
 
   let schoolId = null;
   const { data: scholen } = await admin.from('schools').select('school_id');
@@ -1099,20 +1157,77 @@ async function handleIntegrationsLvsImport(req: Request, admin: Admin) {
     verzuimVerwerkt++;
   }
 
+  let klassenVerwerkt = 0;
+  for (const c of classes || []) {
+    if (!c.name) continue;
+    const { data: bestaand } = await admin.from('classes').select('class_id').eq('school_id', schoolId).eq('name', c.name).maybeSingle();
+    const payload = { level: c.level || null, year: c.year || null };
+    const { error } = bestaand
+      ? await admin.from('classes').update(payload).eq('class_id', bestaand.class_id)
+      : await admin.from('classes').insert({ school_id: schoolId, name: c.name, ...payload });
+    if (!error) klassenVerwerkt++;
+  }
+
+  let vakkenVerwerkt = 0;
+  for (const s of subjects || []) {
+    if (!s.name) continue;
+    const { data: bestaand } = await admin.from('subjects').select('subject_id').eq('school_id', schoolId).eq('name', s.name).maybeSingle();
+    const payload = { code: s.code || null };
+    const { error } = bestaand
+      ? await admin.from('subjects').update(payload).eq('subject_id', bestaand.subject_id)
+      : await admin.from('subjects').insert({ school_id: schoolId, name: s.name, ...payload });
+    if (!error) vakkenVerwerkt++;
+  }
+
+  let oudersVerwerkt = 0;
+  for (const g of guardians || []) {
+    if (!g.fullName || !g.studentNumber) continue;
+    const { data: student } = await admin.from('students').select('student_id').eq('school_id', schoolId).eq('student_number', g.studentNumber).maybeSingle();
+    if (!student) continue;
+    const { data: bestaand } = g.email
+      ? await admin.from('guardians').select('guardian_id').eq('school_id', schoolId).eq('email', g.email).maybeSingle()
+      : { data: null };
+    const payload = { full_name: g.fullName, email: g.email || null, phone: g.phone || null };
+    let guardianId = bestaand?.guardian_id;
+    if (bestaand) {
+      await admin.from('guardians').update(payload).eq('guardian_id', bestaand.guardian_id);
+    } else {
+      const { data: nieuw, error } = await admin.from('guardians').insert({ school_id: schoolId, ...payload }).select('guardian_id').single();
+      if (error) continue;
+      guardianId = nieuw.guardian_id;
+    }
+    const { data: link } = await admin.from('student_guardians').select('student_id').eq('student_id', student.student_id).eq('guardian_id', guardianId).maybeSingle();
+    if (!link) await admin.from('student_guardians').insert({ student_id: student.student_id, guardian_id: guardianId, relation: g.relation || null });
+    oudersVerwerkt++;
+  }
+
   const importRows = [
     { kind: 'leerlingen', count: leerlingenVerwerkt, total: (students || []).length },
     { kind: 'verzuim', count: verzuimVerwerkt, total: (attendance || []).length },
+    { kind: 'klassen', count: klassenVerwerkt, total: (classes || []).length },
+    { kind: 'vakken', count: vakkenVerwerkt, total: (subjects || []).length },
+    { kind: 'ouders', count: oudersVerwerkt, total: (guardians || []).length },
   ];
   for (const r of importRows) {
     if (r.total === 0) continue;
     await admin.from('imports').insert({ school_id: schoolId, kind: r.kind, filename: `lvs-import-${source || 'onbekend'}`, status: 'afgerond', imported_count: r.count, error_count: r.total - r.count });
   }
   // cijfers/rooster: geen persistente tabel in dit schema (zie Fase 4) -
-  // bewust alleen genoteerd, niet verwerkt (architectuur-klaar, spec vroeg
-  // expliciet niet om de LVS-koppelingen daadwerkelijk te bouwen).
+  // bewust alleen genoteerd, niet verwerkt (docenten/personeel blijft ook
+  // bewust ongemoeid: een login-account aanmaken is een bewuste,
+  // beveiligingsgevoelige actie die via Schoolbeheer loopt, niet via een
+  // CSV-import zonder toezicht).
   const genegeerd = { grades: (grades || []).length, schedules: (schedules || []).length };
 
-  return json({ ok: true, schoolId, students: { processed: leerlingenVerwerkt, total: (students || []).length }, attendance: { processed: verzuimVerwerkt, total: (attendance || []).length }, notProcessed: genegeerd });
+  return json({
+    ok: true, schoolId,
+    students: { processed: leerlingenVerwerkt, total: (students || []).length },
+    attendance: { processed: verzuimVerwerkt, total: (attendance || []).length },
+    classes: { processed: klassenVerwerkt, total: (classes || []).length },
+    subjects: { processed: vakkenVerwerkt, total: (subjects || []).length },
+    guardians: { processed: oudersVerwerkt, total: (guardians || []).length },
+    notProcessed: genegeerd,
+  });
 }
 
 // === Router ======================================================================

@@ -102,12 +102,15 @@
   renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
   $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
 
-  const VERWERKBARE_TYPES = ['leerlingen', 'verzuim'];
+  const VERWERKBARE_TYPES = ['leerlingen', 'verzuim', 'klassen', 'vakken', 'ouders'];
   const PROVIDERS = ['magister', 'somtoday', 'zermelo', 'untis', 'google_calendar', 'outlook', 'teams', 'email', 'sms', 'whatsapp'];
 
   const ALIAS_MAP = {
     leerlingen: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], fullName: ['naam', 'volledige naam', 'leerling'], className: ['klas'], level: ['niveau'], year: ['leerjaar', 'jaar'] },
     verzuim: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], eventType: ['type', 'soort'], eventDate: ['datum'] },
+    klassen: { name: ['klas', 'klasnaam', 'naam'], level: ['niveau'], year: ['leerjaar', 'jaar'] },
+    vakken: { name: ['vak', 'vaknaam', 'naam'], code: ['vakcode', 'code'] },
+    ouders: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], fullName: ['naam', 'ouder', 'volledige naam'], email: ['email', 'e-mail', 'e-mailadres'], phone: ['telefoon', 'telefoonnummer'], relation: ['relatie', 'rol'] },
   };
 
   function parseCsv(text) {
@@ -210,6 +213,69 @@
             event_date: (kolomDatum ? r[kolomDatum] : null) || new Date().toISOString().slice(0, 10), note: `CSV-import (${filename})`,
           });
           if (error) fouten++; else verwerkt++;
+        }
+      } else if (kind === 'klassen') {
+        const aliases = ALIAS_MAP.klassen;
+        const kolomNaam = matchAlias(huidigeHeaders, aliases.name);
+        const kolomNiveau = matchAlias(huidigeHeaders, aliases.level);
+        const kolomJaar = matchAlias(huidigeHeaders, aliases.year);
+        for (const r of huidigeRows) {
+          const naam = kolomNaam ? r[kolomNaam] : null;
+          if (!naam) { fouten++; continue; }
+          const { data: bestaand } = await supabase.from('classes').select('class_id').eq('school_id', profile.school_id).eq('name', naam).maybeSingle();
+          const payload = { level: kolomNiveau ? r[kolomNiveau] || null : null, year: kolomJaar ? Number(r[kolomJaar]) || null : null };
+          const { error } = bestaand
+            ? await supabase.from('classes').update(payload).eq('class_id', bestaand.class_id)
+            : await supabase.from('classes').insert({ school_id: profile.school_id, name: naam, ...payload });
+          if (error) fouten++; else verwerkt++;
+        }
+      } else if (kind === 'vakken') {
+        const aliases = ALIAS_MAP.vakken;
+        const kolomNaam = matchAlias(huidigeHeaders, aliases.name);
+        const kolomCode = matchAlias(huidigeHeaders, aliases.code);
+        for (const r of huidigeRows) {
+          const naam = kolomNaam ? r[kolomNaam] : null;
+          if (!naam) { fouten++; continue; }
+          const { data: bestaand } = await supabase.from('subjects').select('subject_id').eq('school_id', profile.school_id).eq('name', naam).maybeSingle();
+          const payload = { code: kolomCode ? r[kolomCode] || null : null };
+          const { error } = bestaand
+            ? await supabase.from('subjects').update(payload).eq('subject_id', bestaand.subject_id)
+            : await supabase.from('subjects').insert({ school_id: profile.school_id, name: naam, ...payload });
+          if (error) fouten++; else verwerkt++;
+        }
+      } else if (kind === 'ouders') {
+        const aliases = ALIAS_MAP.ouders;
+        const kolomStudentNr = matchAlias(huidigeHeaders, aliases.studentNumber);
+        const kolomNaam = matchAlias(huidigeHeaders, aliases.fullName);
+        const kolomEmail = matchAlias(huidigeHeaders, aliases.email);
+        const kolomTelefoon = matchAlias(huidigeHeaders, aliases.phone);
+        const kolomRelatie = matchAlias(huidigeHeaders, aliases.relation);
+        for (const r of huidigeRows) {
+          const naam = kolomNaam ? r[kolomNaam] : null;
+          const studentNumber = kolomStudentNr ? r[kolomStudentNr] : null;
+          if (!naam || !studentNumber) { fouten++; continue; }
+          const { data: student } = await supabase.from('students').select('student_id').eq('school_id', profile.school_id).eq('student_number', studentNumber).maybeSingle();
+          if (!student) { fouten++; continue; }
+          const email = kolomEmail ? r[kolomEmail] || null : null;
+          const { data: bestaand } = email
+            ? await supabase.from('guardians').select('guardian_id').eq('school_id', profile.school_id).eq('email', email).maybeSingle()
+            : { data: null };
+          const payload = { full_name: naam, email, phone: kolomTelefoon ? r[kolomTelefoon] || null : null };
+          let guardianId = bestaand?.guardian_id;
+          if (bestaand) {
+            const { error } = await supabase.from('guardians').update(payload).eq('guardian_id', bestaand.guardian_id);
+            if (error) { fouten++; continue; }
+          } else {
+            const { data: nieuw, error } = await supabase.from('guardians').insert({ school_id: profile.school_id, ...payload }).select('guardian_id').single();
+            if (error) { fouten++; continue; }
+            guardianId = nieuw.guardian_id;
+          }
+          const { data: link } = await supabase.from('student_guardians').select('student_id').eq('student_id', student.student_id).eq('guardian_id', guardianId).maybeSingle();
+          if (!link) {
+            const { error } = await supabase.from('student_guardians').insert({ student_id: student.student_id, guardian_id: guardianId, relation: kolomRelatie ? r[kolomRelatie] || null : null });
+            if (error) { fouten++; continue; }
+          }
+          verwerkt++;
         }
       }
 

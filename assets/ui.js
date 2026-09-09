@@ -164,6 +164,23 @@ export function printDocument(title, bodyText, meta = {}) {
   setTimeout(() => win.print(), 300);
 }
 
+// Genereert een lange, willekeurige token voor magic-link e-mail-
+// bevestigingen (Fase 10) - opgeslagen op de rij zelf (conversations/
+// opp_signatures.confirm_token) en gevalideerd door de publieke edge
+// function `openbare-bevestiging`, die geen sessie/JWT nodig heeft.
+export function generateConfirmToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 21 dagen geldig - genoeg speling voor een schoolproces, zonder voor
+// altijd geldig te blijven.
+export function confirmTokenExpiry() {
+  const d = new Date();
+  d.setDate(d.getDate() + 21);
+  return d.toISOString();
+}
+
 export function friendlyError(error) {
   if (!error) return 'Er ging iets mis.';
   const msg = error.message || String(error);
@@ -208,6 +225,40 @@ export function barChart(items, { height = 160, formatValue = (n) => String(n) }
   return `<div style="overflow-x:auto;min-width:0;"><svg viewBox="0 0 ${w} ${height}" style="width:${w}px;height:${height}px;display:block;" role="img">${bars}</svg></div>`;
 }
 
+// Welke rollen elke module-pagina mogen zien - moet exact overeenkomen met
+// de MODULE_ROLLEN-constante die elke pagina zelf al gebruikt bij
+// requireUser() (dat is de echte toegangscontrole; dit is alleen de
+// zichtbaarheid van de sidebar-link, zodat iemand geen link ziet naar een
+// pagina waar diegene toch niet in mag). Bewust één centrale plek i.p.v.
+// deze lijst 13x los in elke pagina te herhalen.
+const PAGE_ROLLEN = {
+  '/gemiste-toetsen.html': ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'],
+  '/verzuim.html': ['administrator', 'directie', 'teamleider', 'mentor', 'verzuimcoordinator', 'ouder', 'leerling'],
+  '/maatwerk.html': ['administrator', 'mentor', 'vakdocent', 'teamleider', 'leerling', 'ouder'],
+  '/signalen.html': ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator', 'ouder'],
+  '/opp-zorg.html': ['administrator', 'zorgcoordinator', 'mentor', 'teamleider', 'ouder', 'leerling'],
+  '/toetsbank.html': ['administrator', 'vakdocent', 'surveillant'],
+  '/surveillance.html': ['administrator', 'surveillant'],
+  '/rooster.html': ['administrator', 'teamleider'],
+  '/cockpit.html': ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'],
+  '/import.html': ['administrator'],
+  '/beheer.html': ['administrator'],
+  // '/dashboard.html' staat bewust niet in deze lijst - "Overzicht" is voor
+  // elke rol zichtbaar.
+};
+
+// Verbergt sidebar-links naar pagina's waar deze rol toch geen toegang toe
+// heeft - zonder dit zag elke rol dezelfde volledige lijst (incl.
+// Schoolbeheer, Management cockpit, enz.), wat verwarrend is en de indruk
+// wekt dat iedereen daar ook bij kan.
+function filterSidebarNav(role) {
+  $$('.nav-link').forEach((link) => {
+    const path = new URL(link.href, window.location.origin).pathname;
+    const toegestaan = PAGE_ROLLEN[path];
+    if (toegestaan && !toegestaan.includes(role)) link.hidden = true;
+  });
+}
+
 // Vult de topbar (naam, rol, uitlog-knop) die op elk dashboard hetzelfde is.
 export function renderTopbar(profile, roleLabel, signOutFn) {
   const nameEl = $('#topbar-name');
@@ -223,4 +274,5 @@ export function renderTopbar(profile, roleLabel, signOutFn) {
   if (menuBtn && sidebar) {
     menuBtn.addEventListener('click', () => sidebar.classList.toggle('sidebar--open'));
   }
+  filterSidebarNav(profile.role);
 }

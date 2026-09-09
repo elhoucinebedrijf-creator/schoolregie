@@ -99,6 +99,7 @@
       </div>
       <div class="field"><label for="g-objectives">Leerdoelen</label><input id="g-objectives" placeholder="Bijv. ontbinden in factoren, abc-formule" /></div>
       <div class="field"><label for="g-original">Originele toetstekst (optioneel, verbetert het resultaat)</label><textarea id="g-original" rows="6"></textarea></div>
+      <div class="field"><label for="g-file">Originele toets uploaden (optioneel - PDF/JPG/PNG, verbetert het resultaat)</label><input type="file" id="g-file" accept="application/pdf,image/jpeg,image/png,image/jpg" /></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
         <button type="submit" class="btn btn-primary" id="g-submit">Genereren</button>
@@ -112,11 +113,13 @@
   <div class="modal modal--wide">
     <div class="modal-header"><h3>AI-concept beoordelen</h3><button class="modal-close" data-close>&times;</button></div>
     <div id="beoordeel-body"></div>
+    <div class="field"><label for="b-feedback">Aanwijzingen voor een nieuwe versie (optioneel)</label><textarea id="b-feedback" rows="2" placeholder="Bijv. vraag 3 is te makkelijk, gebruik andere getallen bij vraag 5…"></textarea></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+      <button type="button" class="btn btn-ghost" id="btn-opnieuw">Opnieuw genereren</button>
       <button type="button" class="btn btn-ghost" id="btn-print-toets">Toets afdrukken/PDF</button>
       <button type="button" class="btn btn-ghost" id="btn-print-antwoordmodel">Antwoordmodel afdrukken/PDF</button>
-      <button type="button" class="btn btn-primary" id="btn-goedkeuren">Goedkeuren</button>
+      <button type="button" class="btn btn-primary" id="btn-goedkeuren">Goedkeuren (→ surveillant + printer)</button>
     </div>
   </div>
 </div>
@@ -130,6 +133,11 @@
   if (!ctx) throw new Error('niet ingelogd');
   const { profile, supabase } = ctx;
   const isStaff = !['ouder', 'leerling'].includes(profile.role);
+  // Toetsinhoud (vragen/antwoordmodel) mag NOOIT gezien worden door
+  // leerling/ouder, en ook niet door mentor/teamleider/directie/
+  // surveillant - alleen vakdocent/administrator beoordelen en keuren
+  // goed. Consistent met de RLS op test_documents (Fase 9).
+  const CAN_SEE_CONTENT = ['vakdocent', 'administrator'].includes(profile.role);
 
   renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
   $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
@@ -198,7 +206,33 @@
           .from('makeup_tests')
           .insert({ school_id: profile.school_id, missed_test_id: missed.missed_test_id, status: 'nieuw' });
         if (e2) throw e2;
-        toast('Gemiste toets geregistreerd.', 'good');
+
+        // Taak + melding voor de docent die de inhaaltoets moet genereren,
+        // en een melding naar leerling/ouder(s) - dit gebeurde al wel voor
+        // het n8n-webhook-pad (handleMissedTests), maar ontbrak hier in de
+        // browser-flow die docenten dagelijks echt gebruiken.
+        const [{ data: test }, { data: student }] = await Promise.all([
+          supabase.from('tests').select('teacher_profile_id').eq('test_id', testId).maybeSingle(),
+          supabase.from('students').select('full_name, mentor_profile_id').eq('student_id', studentId).maybeSingle(),
+        ]);
+        const teacherId = test?.teacher_profile_id || profile.id;
+        const naam = student?.full_name || 'de leerling';
+        await supabase.from('tasks').insert({
+          school_id: profile.school_id, title: `AI-inhaaltoets genereren voor ${naam}`,
+          description: `${naam} heeft een toets gemist (reden: ${reason || 'onbekend'}). Genereer en beoordeel een AI-inhaaltoets.`,
+          owner_profile_id: teacherId, related_student_id: studentId, related_type: 'missed_test', related_id: missed.missed_test_id, status: 'nieuw',
+        });
+        const staffBody = `${naam} heeft een toets gemist (reden: ${reason || 'onbekend'}). Er is automatisch een inhaalactie aangemaakt.`;
+        const ontvangers = [...new Set([teacherId, student?.mentor_profile_id].filter(Boolean))];
+        for (const ontvangerId of ontvangers) {
+          await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, recipient_profile_id: ontvangerId, channel: 'email', template_key: 'missed_test_notice', subject: `Gemiste toets: ${naam}`, body: staffBody, status: 'nieuw' });
+        }
+        const { data: guardianLinks } = await supabase.from('student_guardians').select('guardian_id').eq('student_id', studentId);
+        for (const g of guardianLinks || []) {
+          await supabase.from('communications').insert({ school_id: profile.school_id, student_id: studentId, guardian_id: g.guardian_id, channel: 'email', template_key: 'missed_test_notice_family', subject: `Gemiste toets: ${naam}`, body: `${naam} heeft een toets gemist. Zodra er een inhaalmoment is, hoor je dat automatisch.`, status: 'nieuw' });
+        }
+
+        toast('Gemiste toets geregistreerd en betrokkenen geïnformeerd.', 'good');
         closeModal('#nieuw-modal');
         e.target.reset();
         await laadRijen();
@@ -212,16 +246,36 @@
     $('#genereer-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = $('#g-submit');
-      setLoading(btn, true, 'AI genereert… (kan even duren)');
+      const file = $('#g-file').files[0];
+      const missedTestId = $('#g-missed-id').value;
       try {
+        // Upload is optioneel - als de docent geen bestand heeft, genereert
+        // de AI direct op basis van vak/niveau/leerdoelen/toetstekst. Is er
+        // wel een bestand, dan wordt dat éérst als "origineel" bewaard in
+        // de toetsbank.
+        if (file) {
+          setLoading(btn, true, 'Bestand uploaden…');
+          const path = `${profile.school_id}/${missedTestId}/${Date.now()}-${file.name}`;
+          const { error: uploadError } = await supabase.storage.from('toetsbank').upload(path, file, { upsert: false });
+          if (uploadError) throw uploadError;
+
+          const { data: missed } = await supabase.from('missed_tests').select('school_id, test_id').eq('missed_test_id', missedTestId).maybeSingle();
+          const { error: docError } = await supabase.from('test_documents').insert({
+            school_id: missed.school_id, test_id: missed.test_id, missed_test_id: missedTestId,
+            kind: 'origineel', file_url: path, status: 'goedgekeurd', ai_human_review_required: false,
+          });
+          if (docError) throw docError;
+        }
+
+        setLoading(btn, true, 'AI genereert… (kan even duren)');
         await invokeFunction('genereer-inhaaltoets', {
-          missedTestId: $('#g-missed-id').value,
+          missedTestId,
           subject: $('#g-subject').value.trim(),
           level: $('#g-level').value.trim(),
           learningObjectives: $('#g-objectives').value.trim(),
           originalTestText: $('#g-original').value.trim(),
         });
-        toast('AI-concept gegenereerd - klaar voor beoordeling.', 'good');
+        toast(file ? 'Origineel opgeslagen en AI-concept gegenereerd - klaar voor beoordeling.' : 'AI-concept gegenereerd - klaar voor beoordeling.', 'good');
         closeModal('#genereer-modal');
         e.target.reset();
         await laadRijen();
@@ -251,9 +305,13 @@
         const makeup = Array.isArray(r.makeup_tests) ? r.makeup_tests[0] : r.makeup_tests;
         let actie = '';
         if (makeup?.status === 'nieuw') {
-          actie = `<button class="btn btn-sm btn-secondary" data-genereer="${r.missed_test_id}">AI-inhaaltoets genereren</button>`;
+          actie = CAN_SEE_CONTENT
+            ? `<button class="btn btn-sm btn-secondary" data-genereer="${r.missed_test_id}">AI-inhaaltoets genereren</button>`
+            : `<span class="hint">Wacht op vakdocent</span>`;
         } else if (makeup?.status === 'wacht_op_goedkeuring') {
-          actie = `<button class="btn btn-sm btn-primary" data-beoordeel="${r.missed_test_id}" data-makeup="${makeup.makeup_test_id}">Beoordelen</button>`;
+          actie = CAN_SEE_CONTENT
+            ? `<button class="btn btn-sm btn-primary" data-beoordeel="${r.missed_test_id}" data-makeup="${makeup.makeup_test_id}">Beoordelen</button>`
+            : `<span class="hint">Wacht op beoordeling vakdocent</span>`;
         } else if (makeup?.status === 'goedgekeurd') {
           actie = `<button class="btn btn-sm btn-primary" data-inplannen="${makeup.makeup_test_id}" data-student="${r.student_id}">Inplannen</button>`;
         }
@@ -287,7 +345,7 @@
     async function beoordeelOpenen(makeupTestId, missedTestId) {
       const { data: docs, error } = await supabase
         .from('test_documents')
-        .select('document_id, kind, content, ai_confidence, ai_reason')
+        .select('document_id, kind, content, hulpmiddelen, ai_confidence, ai_reason, ai_data_used')
         .eq('missed_test_id', missedTestId)
         .eq('status', 'wacht_op_goedkeuring')
         .order('created_at', { ascending: false })
@@ -300,23 +358,59 @@
         <p class="hint">${escapeHtml(variant?.ai_reason || '')}</p>
         <div class="field"><label>Inhaaltoets (concept)</label><textarea rows="8" readonly>${escapeHtml(variant?.content || '')}</textarea></div>
         <div class="field"><label>Antwoordmodel (concept)</label><textarea rows="6" readonly>${escapeHtml(model?.content || '')}</textarea></div>
+        <div class="field"><label for="b-hulpmiddelen">Hulpmiddelen voor de surveillant (nodig/toegestaan tijdens afname)</label><input id="b-hulpmiddelen" value="${escapeHtml(variant?.hulpmiddelen || '')}" /></div>
       `;
+      $('#b-feedback').value = '';
       $('#btn-print-toets').onclick = () => printDocument('Inhaaltoets (concept)', variant?.content || '', { Vak: '', Status: 'Nog te beoordelen' });
       $('#btn-print-antwoordmodel').onclick = () => printDocument('Antwoordmodel (concept)', model?.content || '', { Status: 'Nog te beoordelen' });
+
+      $('#btn-opnieuw').onclick = async () => {
+        const feedback = $('#b-feedback').value.trim();
+        if (!feedback) { toast('Geef eerst aan wat er anders moet voordat je opnieuw genereert.', 'critical'); return; }
+        const btn = $('#btn-opnieuw');
+        setLoading(btn, true, 'AI genereert opnieuw…');
+        try {
+          const used = variant?.ai_data_used || {};
+          await invokeFunction('genereer-inhaaltoets', {
+            missedTestId,
+            subject: used.subject || '',
+            level: used.level || '',
+            learningObjectives: used.learningObjectives || '',
+            originalTestText: '',
+            feedback,
+          });
+          toast('Nieuw concept gegenereerd - het vorige is geannuleerd.', 'good');
+          closeModal('#beoordeel-modal');
+          await laadRijen();
+        } catch (err) {
+          toast(friendlyError(err), 'critical');
+        } finally {
+          setLoading(btn, false);
+        }
+      };
+
       $('#btn-goedkeuren').onclick = async () => {
         const btn = $('#btn-goedkeuren');
         setLoading(btn, true, 'Bezig…');
         try {
+          const hulpmiddelen = $('#b-hulpmiddelen').value.trim() || null;
           const ids = (docs || []).map((d) => d.document_id);
           const { error: e1 } = await supabase
             .from('test_documents')
             .update({ status: 'goedgekeurd', approved_by: profile.id, approved_at: new Date().toISOString() })
             .in('document_id', ids);
           if (e1) throw e1;
+          if (variant) {
+            await supabase.from('test_documents').update({ hulpmiddelen }).eq('document_id', variant.document_id);
+          }
           const { error: e2 } = await supabase.from('makeup_tests').update({ status: 'goedgekeurd' }).eq('makeup_test_id', makeupTestId);
           if (e2) throw e2;
-          toast('Inhaaltoets goedgekeurd.', 'good');
+          await supabase.from('tasks').update({ status: 'afgerond' }).eq('related_type', 'makeup_test').eq('related_id', makeupTestId).eq('status', 'nieuw');
+          toast('Inhaaltoets goedgekeurd - klaar voor de surveillant.', 'good');
           closeModal('#beoordeel-modal');
+          // Direct naar de printer/PDF-dialoog, zoals gevraagd: de vakdocent
+          // kan in één vloeiende actie afdrukken/opslaan na goedkeuren.
+          printDocument('Inhaaltoets (goedgekeurd)', variant?.content || '', { Hulpmiddelen: hulpmiddelen || 'geen', Status: 'Goedgekeurd' });
           await laadRijen();
         } catch (err) {
           toast(friendlyError(err), 'critical');
@@ -365,13 +459,17 @@
   }
 
   async function initStudentView() {
+    // Bewust GEEN toetsinhoud in dit zicht - een leerling mag de
+    // inhaaltoets nooit vooraf zien, alleen op papier tijdens het
+    // inhaalmoment zelf. Hier staat alleen wat de leerling/ouder nodig
+    // heeft om op te dagen: vak en inhaalmoment (datum/tijd/lokaal).
     $('#student-hint').textContent = profile.role === 'ouder'
-      ? 'Openstaande en goedgekeurde inhaaltoetsen van je kind(eren).'
-      : 'Jouw openstaande en goedgekeurde inhaaltoetsen.';
+      ? 'Vakken en inhaalmomenten van je kind(eren) - de toets zelf zie je hier nooit, die wordt op papier afgenomen tijdens het inhaalmoment.'
+      : 'Jouw vakken en inhaalmomenten - de toets zelf zie je hier nooit, die krijg je op papier tijdens het inhaalmoment.';
 
     const { data: missed, error } = await supabase
       .from('missed_tests')
-      .select('missed_test_id, reason, status, students(full_name), makeup_tests(status, document_id)')
+      .select('missed_test_id, reason, status, students(full_name), tests(title, subjects(name)), makeup_tests(status, makeup_slots(starts_at, location))')
       .order('created_at', { ascending: false });
     if (error) {
       $('#student-rows').innerHTML = `<p style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</p>`;
@@ -382,30 +480,18 @@
       return;
     }
 
-    const rows = [];
-    const teksten = new Map();
-    for (const m of missed) {
+    $('#student-rows').innerHTML = missed.map((m) => {
       const makeup = Array.isArray(m.makeup_tests) ? m.makeup_tests[0] : m.makeup_tests;
-      let toetstekst = '';
-      if (makeup?.document_id) {
-        const { data: doc } = await supabase.from('test_documents').select('content').eq('document_id', makeup.document_id).maybeSingle();
-        toetstekst = doc?.content || '';
-      }
-      teksten.set(m.missed_test_id, { naam: m.students?.full_name || '', tekst: toetstekst });
-      rows.push(`<div class="card" style="margin-bottom:12px;">
-        <div class="card-row"><h4>${escapeHtml(m.students?.full_name || '')}</h4>${statusBadge(makeup?.status || m.status)}</div>
-        <p class="hint">Reden gemist: ${escapeHtml(m.reason || 'onbekend')}</p>
-        ${toetstekst
-          ? `<div class="field"><label>Inhaaltoets</label><textarea rows="8" readonly>${escapeHtml(toetstekst)}</textarea></div>
-             <button class="btn btn-sm btn-secondary" data-print-inhaaltoets="${m.missed_test_id}">Afdrukken/PDF</button>`
-          : `<p class="hint">Nog geen goedgekeurde inhaaltoets beschikbaar.</p>`}
-      </div>`);
-    }
-    $('#student-rows').innerHTML = rows.join('');
-    $$('[data-print-inhaaltoets]').forEach((btn) => btn.addEventListener('click', () => {
-      const info = teksten.get(btn.dataset.printInhaaltoets);
-      printDocument('Inhaaltoets', info?.tekst || '', { Leerling: info?.naam || '' });
-    }));
+      const slot = makeup && (Array.isArray(makeup.makeup_slots) ? makeup.makeup_slots[0] : makeup.makeup_slots);
+      const vak = m.tests?.subjects?.name || m.tests?.title || 'Onbekend vak';
+      const momentHtml = slot?.starts_at
+        ? `<p class="hint">Inhaalmoment: <strong>${formatDateTime(slot.starts_at)}</strong>${slot.location ? ` in ${escapeHtml(slot.location)}` : ''}</p>`
+        : `<p class="hint">Nog geen inhaalmoment ingepland.</p>`;
+      return `<div class="card" style="margin-bottom:12px;">
+        <div class="card-row"><h4>${escapeHtml(m.students?.full_name || '')} - ${escapeHtml(vak)}</h4>${statusBadge(makeup?.status || m.status)}</div>
+        ${momentHtml}
+      </div>`;
+    }).join('');
   }
 </script>
 </body>

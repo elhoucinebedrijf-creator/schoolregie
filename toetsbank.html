@@ -49,8 +49,8 @@
 
     <div class="content">
       <div class="card">
-        <div class="card-row"><h3>Documenten</h3><button class="btn btn-primary" id="btn-nieuw">+ Document toevoegen</button></div>
-        <p class="hint">Originele toetsen en antwoordmodellen die je hier toevoegt staan direct als goedgekeurd - AI-varianten uit de inhaaltoets-flow (Gemiste toetsen) wachten altijd eerst op beoordeling door de vakdocent.</p>
+        <div class="card-row"><h3>Documenten</h3><button class="btn btn-primary" id="btn-nieuw" hidden>+ Document toevoegen</button></div>
+        <p class="hint" id="toetsbank-hint">Originele toetsen en antwoordmodellen die je hier toevoegt staan direct als goedgekeurd - AI-varianten uit de inhaaltoets-flow (Gemiste toetsen) wachten altijd eerst op beoordeling door de vakdocent.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Toets</th><th>Type</th><th>Status</th><th>Inhoud</th></tr></thead>
           <tbody id="docs-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
@@ -108,6 +108,16 @@
   $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
   function openModal(id) { $(id).classList.add('open'); }
   function closeModal(id) { $(id).classList.remove('open'); }
+
+  // Alleen vakdocent/administrator mogen documenten toevoegen/bewerken
+  // (consistent met de test_documents-RLS). Surveillant ziet en print
+  // alleen goedgekeurde documenten - RLS filtert dat al server-side.
+  const CAN_MANAGE = ['vakdocent', 'administrator'].includes(profile.role);
+  if (CAN_MANAGE) {
+    $('#btn-nieuw').hidden = false;
+  } else {
+    $('#toetsbank-hint').textContent = 'Je ziet hier alleen goedgekeurde documenten, klaar om af te drukken/af te nemen.';
+  }
 
   const KIND_LABEL = { origineel: 'Origineel', ai_variant: 'AI-inhaaltoets', antwoordmodel: 'Antwoordmodel' };
   const STATUS_TONE = { nieuw: 'neutral', wacht_op_goedkeuring: 'warn', goedgekeurd: 'good' };
