@@ -55,6 +55,30 @@ rolgevoelige `dashboard.html` (`assets/supabase-client.js` →
 per-rol gefilterde module-lijst (`ALLE_MODULES` in `dashboard.html`) die
 meegroeit naarmate elke fase een module daadwerkelijk bouwt.
 
+## Mijn profiel: wachtwoord + 2FA
+
+`profiel.html` (bereikbaar voor elke rol via "Mijn profiel" onderaan de
+sidebar):
+
+- **Wachtwoord wijzigen**: vraagt eerst het huidige wachtwoord en
+  her-authenticeert daarmee (`signInWithPassword`) vóór
+  `supabase.auth.updateUser({password})` - voorkomt dat iemand een open
+  sessie op een gedeeld apparaat misbruikt om het wachtwoord te wijzigen
+  zonder het huidige te kennen.
+- **2FA (TOTP)**: standaard Supabase Auth MFA (`supabase.auth.mfa.*`) -
+  QR-code + handmatige code tonen bij inschakelen
+  (`mfa.enroll({factorType:'totp'})`), bevestigen met een 6-cijferige
+  code (`mfa.challenge` + `mfa.verify`), uitschakelbaar
+  (`mfa.unenroll`). `login.html` is uitgebreid met een AAL1→AAL2-stap:
+  na een geslaagde wachtwoord-login wordt gecontroleerd of de account
+  een geverifieerde TOTP-factor heeft
+  (`mfa.getAuthenticatorAssuranceLevel()`) en zo ja, verschijnt een
+  code-invoerscherm vóór de gebruiker bij het dashboard komt.
+
+Volledig end-to-end getest (Playwright + `otplib` om echte TOTP-codes
+te genereren): wachtwoord wijzigen, 2FA inschakelen, uitloggen,
+opnieuw inloggen mét de 2FA-code, 2FA weer uitschakelen - alles werkt.
+
 ## RLS-aanpak (Fase 0 - bewust een startpunt, geen eindbeeld)
 
 `current_school_id()`/`current_rol()`/`is_staff()` (security definer-

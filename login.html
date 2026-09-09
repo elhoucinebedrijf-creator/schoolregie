@@ -39,7 +39,18 @@
             <button class="btn btn-primary btn-block" type="submit" id="submit-btn">Inloggen</button>
             <p id="error" class="error-text" hidden></p>
           </form>
-          <p style="margin-top:14px;"><a href="/wachtwoord-vergeten.html">Wachtwoord vergeten?</a></p>
+
+          <form id="mfa-form" hidden>
+            <p style="margin-bottom:14px;">Deze account heeft tweestapsverificatie aan staan. Voer de 6-cijferige code uit je authenticator-app in.</p>
+            <div class="field">
+              <label for="mfa-code">Verificatiecode</label>
+              <input id="mfa-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required />
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" id="mfa-submit-btn">Bevestigen</button>
+            <p id="mfa-error" class="error-text" hidden></p>
+          </form>
+
+          <p style="margin-top:14px;" id="forgot-link"><a href="/wachtwoord-vergeten.html">Wachtwoord vergeten?</a></p>
         </div>
       </div>
     </div>
@@ -52,6 +63,15 @@
     getSessionProfile().then(({ session, profile }) => {
       if (session && profile) window.location.href = ROLE_HOME[profile.role] || '/login.html';
     });
+
+    async function naarDashboard() {
+      const { profile } = await getSessionProfile();
+      if (!profile) {
+        window.location.href = '/account-nog-niet-actief.html';
+        return;
+      }
+      window.location.href = ROLE_HOME[profile.role] || '/login.html';
+    }
 
     $('#login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -67,12 +87,47 @@
         setLoading(btn, false);
         return;
       }
-      const { profile } = await getSessionProfile();
-      if (!profile) {
-        window.location.href = '/account-nog-niet-actief.html';
+
+      // Wachtwoord klopt (AAL1) - checken of deze account 2FA (AAL2) vereist.
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal && aal.nextLevel === 'aal2' && aal.nextLevel !== aal.currentLevel) {
+        const { data: factors } = await supabase.auth.mfa.listFactors();
+        const factor = factors?.totp?.[0];
+        if (!factor) { await naarDashboard(); return; }
+        const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: factor.id });
+        if (challengeError) {
+          $('#error').hidden = false;
+          $('#error').textContent = friendlyError(challengeError);
+          setLoading(btn, false);
+          return;
+        }
+        $('#login-form').hidden = true;
+        $('#forgot-link').hidden = true;
+        $('#mfa-form').hidden = false;
+        $('#mfa-form').dataset.factorId = factor.id;
+        $('#mfa-form').dataset.challengeId = challenge.id;
+        $('#mfa-code').focus();
         return;
       }
-      window.location.href = ROLE_HOME[profile.role] || '/login.html';
+
+      await naarDashboard();
+    });
+
+    $('#mfa-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#mfa-submit-btn');
+      $('#mfa-error').hidden = true;
+      setLoading(btn, true, 'Bezig…');
+      const factorId = $('#mfa-form').dataset.factorId;
+      const challengeId = $('#mfa-form').dataset.challengeId;
+      const { error } = await supabase.auth.mfa.verify({ factorId, challengeId, code: $('#mfa-code').value.trim() });
+      if (error) {
+        $('#mfa-error').hidden = false;
+        $('#mfa-error').textContent = friendlyError(error);
+        setLoading(btn, false);
+        return;
+      }
+      await naarDashboard();
     });
   </script>
 </body>

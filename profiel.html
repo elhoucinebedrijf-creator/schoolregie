@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mijn profiel - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <div class="sidebar-footer">
+      <a class="btn btn-ghost sidebar-signout" href="/profiel.html" style="text-align:center;text-decoration:none;display:block;">Mijn profiel</a>
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Mijn profiel</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card" style="margin-bottom:16px;max-width:520px;">
+        <div class="card-row"><h3>Mijn gegevens</h3></div>
+        <p class="hint">Naam: <strong id="p-naam"></strong></p>
+        <p class="hint">E-mailadres: <strong id="p-email"></strong></p>
+        <p class="hint">Rol: <strong id="p-rol"></strong></p>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;max-width:520px;">
+        <div class="card-row"><h3>Wachtwoord wijzigen</h3></div>
+        <form id="password-form">
+          <div class="field"><label for="pw-current">Huidig wachtwoord</label><input id="pw-current" type="password" autocomplete="current-password" required /></div>
+          <div class="field"><label for="pw-new">Nieuw wachtwoord</label><input id="pw-new" type="password" autocomplete="new-password" minlength="8" required /></div>
+          <div class="field"><label for="pw-confirm">Bevestig nieuw wachtwoord</label><input id="pw-confirm" type="password" autocomplete="new-password" minlength="8" required /></div>
+          <button class="btn btn-primary" type="submit" id="pw-submit">Wachtwoord opslaan</button>
+        </form>
+      </div>
+
+      <div class="card" style="max-width:520px;">
+        <div class="card-row"><h3>Tweestapsverificatie (2FA)</h3></div>
+        <p class="hint" id="mfa-status">Bezig met laden…</p>
+
+        <div id="mfa-off">
+          <p class="hint">Beveilig je account met een authenticator-app (bv. Google Authenticator, Authy, 1Password) - bij inloggen wordt dan naast je wachtwoord ook een 6-cijferige code gevraagd.</p>
+          <button class="btn btn-primary" id="btn-mfa-start">2FA inschakelen</button>
+        </div>
+
+        <div id="mfa-enroll" hidden>
+          <p class="hint">Scan deze QR-code met je authenticator-app, of voer de code handmatig in.</p>
+          <div id="mfa-qr" style="margin:12px 0;max-width:200px;"></div>
+          <p class="hint" style="font-family:var(--font-mono, monospace);word-break:break-all;" id="mfa-secret"></p>
+          <div class="field"><label for="mfa-verify-code">Verificatiecode uit je app</label><input id="mfa-verify-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" /></div>
+          <button class="btn btn-primary" id="btn-mfa-verify">Bevestigen & inschakelen</button>
+          <button class="btn btn-ghost" id="btn-mfa-cancel">Annuleren</button>
+        </div>
+
+        <div id="mfa-on" hidden>
+          <p class="hint">2FA is actief op je account.</p>
+          <button class="btn btn-danger" id="btn-mfa-uitschakelen">2FA uitschakelen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, renderTopbar, toast, setLoading, friendlyError, confirmDangerous } from '/assets/ui.js';
+
+  const ctx = await requireUser();
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, session, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  $('#p-naam').textContent = profile.full_name;
+  $('#p-email').textContent = profile.email;
+  $('#p-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  $('#password-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#pw-submit');
+    const nieuw = $('#pw-new').value;
+    const bevestig = $('#pw-confirm').value;
+    if (nieuw !== bevestig) { toast('Nieuwe wachtwoorden komen niet overeen.', 'critical'); return; }
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error: reAuthError } = await supabase.auth.signInWithPassword({ email: session.user.email, password: $('#pw-current').value });
+      if (reAuthError) throw new Error('Huidig wachtwoord is onjuist.');
+      const { error } = await supabase.auth.updateUser({ password: nieuw });
+      if (error) throw error;
+      toast('Wachtwoord gewijzigd.', 'good');
+      $('#password-form').reset();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await laadMfaStatus();
+
+  async function laadMfaStatus() {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (error) { $('#mfa-status').textContent = friendlyError(error); return; }
+    const actief = data?.totp?.find((f) => f.status === 'verified');
+    $('#mfa-status').hidden = true;
+    $('#mfa-off').hidden = Boolean(actief);
+    $('#mfa-on').hidden = !actief;
+    $('#mfa-enroll').hidden = true;
+    if (actief) $('#mfa-on').dataset.factorId = actief.id;
+  }
+
+  $('#btn-mfa-start').addEventListener('click', async () => {
+    const btn = $('#btn-mfa-start');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
+      if (error) throw error;
+      $('#mfa-qr').innerHTML = data.totp.qr_code;
+      $('#mfa-secret').textContent = `Handmatige code: ${data.totp.secret}`;
+      $('#mfa-enroll').dataset.factorId = data.id;
+      $('#mfa-off').hidden = true;
+      $('#mfa-enroll').hidden = false;
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#btn-mfa-cancel').addEventListener('click', async () => {
+    const factorId = $('#mfa-enroll').dataset.factorId;
+    if (factorId) await supabase.auth.mfa.unenroll({ factorId });
+    $('#mfa-enroll').hidden = true;
+    $('#mfa-off').hidden = false;
+    $('#mfa-verify-code').value = '';
+  });
+
+  $('#btn-mfa-verify').addEventListener('click', async () => {
+    const btn = $('#btn-mfa-verify');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const factorId = $('#mfa-enroll').dataset.factorId;
+      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
+      if (challengeError) throw challengeError;
+      const { error } = await supabase.auth.mfa.verify({ factorId, challengeId: challenge.id, code: $('#mfa-verify-code').value.trim() });
+      if (error) throw error;
+      toast('2FA is ingeschakeld.', 'good');
+      await laadMfaStatus();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#btn-mfa-uitschakelen').addEventListener('click', async () => {
+    if (!confirmDangerous('Weet je zeker dat je 2FA wilt uitschakelen? Je account is dan minder goed beveiligd.')) return;
+    const btn = $('#btn-mfa-uitschakelen');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const factorId = $('#mfa-on').dataset.factorId;
+      const { error } = await supabase.auth.mfa.unenroll({ factorId });
+      if (error) throw error;
+      toast('2FA uitgeschakeld.', 'good');
+      await laadMfaStatus();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+</script>
+</body>
+</html>
