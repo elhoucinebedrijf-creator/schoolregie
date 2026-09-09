@@ -85,6 +85,7 @@
     'Rooster & capaciteit': { rollen: ['administrator', 'teamleider'], status: 'beschikbaar', href: '/rooster.html' },
     'Management cockpit': { rollen: ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'], status: 'beschikbaar', href: '/cockpit.html' },
     'Import & koppelingen': { rollen: ['administrator'], status: 'beschikbaar', href: '/import.html' },
+    'Schoolbeheer': { rollen: ['administrator'], status: 'beschikbaar', href: '/beheer.html' },
   };
 
   const eigenModules = Object.entries(ALLE_MODULES).filter(([, m]) => m.rollen.includes(profile.role));

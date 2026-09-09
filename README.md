@@ -11,15 +11,17 @@ context en fase-indeling staan in
 
 **Live:** https://schoolregie.vercel.app
 **Supabase-project:** `kuxagvhesctephrgfpfo`
-**n8n:** `n8n.elhoucineautomation.nl` (Hostinger Docker Manager) - 16 van
-de 17 workflows actief (WF16 e-mailmeldingen wacht op een SMTP-
-credential, zie "Fase 8" onderaan)
+**n8n:** `n8n.elhoucineautomation.nl` (Hostinger Docker Manager) - alle
+17 workflows actief, inclusief WF16 (e-mailmeldingen) live bevestigd
 **GitHub:** https://github.com/elhoucinebedrijf-creator/schoolregie
+**Testaccounts:** alle 11 rollen op een echt, afleverbaar adres via
+plus-aliasing (één inbox, 11 unieke accounts) - inloggegevens staan
+niet in deze publieke README, vraag ze na bij de projecteigenaar.
 
 ## Status
 
-**Volledig opgeleverd - alle 8 fases afgerond, alle 15 n8n-workflows
-actief en live geverifieerd.**
+**Volledig opgeleverd - alle 8 fases afgerond, alle 17 n8n-workflows
+actief en live geverifieerd (incl. écht ontvangen testmail).**
 
 - [x] Fase 0 - Fundament: schema (31 tabellen, RLS overal), 11 rollen,
       login, rolgebaseerde `dashboard.html` (per rol een gefilterde
@@ -320,12 +322,31 @@ klaar concept zijn (concrete doelen/acties, niet alleen een samenvatting).
   mentor/zorgcoördinator), niet alleen samenvattingstekst -
   `opp-zorg.html` toont ze met per-item goedkeuren/afwijzen.
 
-**WF16 is nog niet geactiveerd** - de "Verstuur e-mail"-node heeft een
-SMTP-credential nodig die de gebruiker zelf in n8n's credentials-UI
-aanmaakt (kan niet via de API zonder het wachtwoord te zien), plus de
-env-var `SCHOOLREGIE_EMAIL_TEST_OVERRIDE` (stuurt tijdens het testen
-alles naar één vast adres i.p.v. de echte ontvangers) vóórdat er
-daadwerkelijk getest en geactiveerd wordt.
+**WF16 is geactiveerd en live bevestigd** - SMTP-credential + de env-var
+`SCHOOLREGIE_EMAIL_TEST_OVERRIDE` zijn gezet, een echte gebeurtenis is
+getriggerd en de mail is aantoonbaar aangekomen (SMTP-server bevestigde
+`accepted`). Onderweg een echte bug gevonden en gefixt: de "Verstuur
+e-mail"-node miste het `emailFormat`-veld, waardoor het `text`-veld
+stilzwijgend verdween zodra de node in de n8n-UI geopend werd (om de
+credential te koppelen) en opgeslagen - de eerste testmails kwamen
+daardoor leeg aan. Fix: `emailFormat: 'text'` en
+`options.appendAttribution: false` (verwijdert ook de n8n-voettekst)
+expliciet gezet.
+
+## Schoolbeheer
+
+`beheer.html` (alleen administrator): een echte school invoeren zonder
+scripts. 4 tabbladen - **Personeel** (maakt een echt inlogaccount aan
+via de nieuwe JWT-geverifieerde functie `beheer-account-aanmaken` -
+moet server-side met de service-role, kan niet via RLS vanuit de
+browser), **Klassen & vakken**, **Cursussen** (vak-klas-docent-
+koppeling), **Leerlingen & ouders**. Grote hoeveelheden leerlingen/
+verzuim gaan sneller via de CSV-import op `import.html`.
+
+De 11 testaccounts zijn omgezet naar echte, afleverbare adressen met
+plus-aliasing i.p.v. een tweede demo-school aan te maken - Supabase Auth staat geen
+dubbele e-mailadressen toe, plus-aliasing lost dat op terwijl alles in
+één inbox landt.
 
 ## n8n-koppeling: één gedeelde `api`-functie
 

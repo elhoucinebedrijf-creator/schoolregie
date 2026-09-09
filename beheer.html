@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Schoolbeheer - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <a class="nav-link active" href="/beheer.html">Schoolbeheer</a>
+    <div class="sidebar-footer">
+      <a class="btn btn-ghost sidebar-signout" href="/profiel.html" style="text-align:center;text-decoration:none;display:block;">Mijn profiel</a>
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Schoolbeheer</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="tabs" style="margin-bottom:16px;">
+        <button class="tab active" data-tab="personeel">Personeel</button>
+        <button class="tab" data-tab="klassen">Klassen & vakken</button>
+        <button class="tab" data-tab="cursussen">Cursussen</button>
+        <button class="tab" data-tab="leerlingen">Leerlingen & ouders</button>
+      </div>
+
+      <div class="tab-panel active" id="panel-personeel">
+        <div class="card">
+          <div class="card-row"><h3>Personeel</h3><button class="btn btn-primary" id="btn-nieuw-personeel">+ Personeelslid toevoegen</button></div>
+          <p class="hint">Elk personeelslid krijgt hiermee een echt inlogaccount (e-mail + wachtwoord).</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Naam</th><th>E-mail</th><th>Rol</th></tr></thead>
+            <tbody id="personeel-body"><tr><td colspan="3" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-klassen">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="card">
+            <div class="card-row"><h3>Klassen</h3><button class="btn btn-primary btn-sm" id="btn-nieuw-klas">+ Klas</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Naam</th><th>Niveau</th><th>Jaar</th><th>Mentor</th></tr></thead>
+              <tbody id="klassen-body"></tbody>
+            </table></div>
+          </div>
+          <div class="card">
+            <div class="card-row"><h3>Vakken</h3><button class="btn btn-primary btn-sm" id="btn-nieuw-vak">+ Vak</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Naam</th></tr></thead>
+              <tbody id="vakken-body"></tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-cursussen">
+        <div class="card">
+          <div class="card-row"><h3>Cursussen (vak-klas-docent)</h3><button class="btn btn-primary" id="btn-nieuw-cursus">+ Cursus</button></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Vak</th><th>Klas</th><th>Docent</th><th>Schooljaar</th></tr></thead>
+            <tbody id="cursussen-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-leerlingen">
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Leerlingen</h3><button class="btn btn-primary" id="btn-nieuw-leerling">+ Leerling</button></div>
+          <p class="hint">Grote aantallen? Gebruik liever de CSV-import op <a href="/import.html">Import & koppelingen</a>.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Naam</th><th>Nummer</th><th>Klas</th><th>Mentor</th></tr></thead>
+            <tbody id="leerlingen-body"></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><h3>Ouders/verzorgers</h3><button class="btn btn-primary" id="btn-nieuw-ouder">+ Ouder/verzorger</button></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Naam</th><th>E-mail</th><th>Kind(eren)</th></tr></thead>
+            <tbody id="ouders-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: personeelslid toevoegen -->
+<div class="modal-backdrop" id="personeel-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Personeelslid toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="personeel-form">
+      <div class="field"><label for="p-naam">Naam</label><input id="p-naam" required /></div>
+      <div class="field"><label for="p-email">E-mailadres</label><input id="p-email" type="email" required /></div>
+      <div class="field"><label for="p-rol">Rol</label>
+        <select id="p-rol">
+          <option value="administrator">Administrator</option><option value="directie">Directie</option>
+          <option value="teamleider">Teamleider</option><option value="mentor">Mentor</option>
+          <option value="vakdocent">Vakdocent</option><option value="surveillant">Surveillant</option>
+          <option value="verzuimcoordinator">Verzuimcoördinator</option><option value="zorgcoordinator">Zorgcoördinator</option>
+          <option value="kwaliteitsmedewerker">Kwaliteitsmedewerker</option><option value="ouder">Ouder/verzorger</option>
+          <option value="leerling">Leerling</option>
+        </select>
+      </div>
+      <div class="field"><label for="p-wachtwoord">Wachtwoord (leeg = automatisch gegenereerd)</label><input id="p-wachtwoord" type="text" minlength="8" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="p-submit">Aanmaken</button>
+      </div>
+    </form>
+    <div id="personeel-resultaat" hidden class="hint" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<!-- modal: klas toevoegen -->
+<div class="modal-backdrop" id="klas-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Klas toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="klas-form">
+      <div class="field"><label for="k-naam">Naam</label><input id="k-naam" placeholder="Bijv. 3H1" required /></div>
+      <div class="form-row">
+        <div class="field"><label for="k-niveau">Niveau</label><input id="k-niveau" placeholder="Bijv. HAVO" /></div>
+        <div class="field"><label for="k-jaar">Leerjaar</label><input id="k-jaar" type="number" min="1" max="6" /></div>
+      </div>
+      <div class="field"><label for="k-mentor">Mentor</label><select id="k-mentor"><option value="">— geen —</option></select></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="k-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: vak toevoegen -->
+<div class="modal-backdrop" id="vak-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Vak toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="vak-form">
+      <div class="field"><label for="v-naam">Naam</label><input id="v-naam" placeholder="Bijv. Wiskunde" required /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="v-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: cursus toevoegen -->
+<div class="modal-backdrop" id="cursus-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Cursus toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="cursus-form">
+      <div class="field"><label for="c-vak">Vak</label><select id="c-vak"></select></div>
+      <div class="field"><label for="c-klas">Klas</label><select id="c-klas"></select></div>
+      <div class="field"><label for="c-docent">Docent</label><select id="c-docent"></select></div>
+      <div class="field"><label for="c-jaar">Schooljaar</label><input id="c-jaar" placeholder="Bijv. 2025-2026" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="c-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: leerling toevoegen -->
+<div class="modal-backdrop" id="leerling-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Leerling toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="leerling-form">
+      <div class="field"><label for="l-naam">Naam</label><input id="l-naam" required /></div>
+      <div class="form-row">
+        <div class="field"><label for="l-nummer">Leerlingnummer</label><input id="l-nummer" /></div>
+        <div class="field"><label for="l-klas">Klas</label><select id="l-klas"><option value="">— geen —</option></select></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="l-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: ouder toevoegen -->
+<div class="modal-backdrop" id="ouder-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Ouder/verzorger toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="ouder-form">
+      <div class="field"><label for="o-naam">Naam</label><input id="o-naam" required /></div>
+      <div class="field"><label for="o-email">E-mailadres</label><input id="o-email" type="email" required /></div>
+      <div class="field"><label for="o-kind">Kind</label><select id="o-kind"></select></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="o-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
+    $$('.tab').forEach((t) => t.classList.remove('active'));
+    tab.classList.add('active');
+    $$('.tab-panel').forEach((p) => p.classList.remove('active'));
+    $(`#panel-${tab.dataset.tab}`).classList.add('active');
+  }));
+
+  $('#btn-nieuw-personeel').addEventListener('click', () => { $('#personeel-resultaat').hidden = true; openModal('#personeel-modal'); });
+  $('#btn-nieuw-klas').addEventListener('click', () => openModal('#klas-modal'));
+  $('#btn-nieuw-vak').addEventListener('click', () => openModal('#vak-modal'));
+  $('#btn-nieuw-cursus').addEventListener('click', () => openModal('#cursus-modal'));
+  $('#btn-nieuw-leerling').addEventListener('click', () => openModal('#leerling-modal'));
+  $('#btn-nieuw-ouder').addEventListener('click', () => openModal('#ouder-modal'));
+
+  $('#personeel-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#p-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const result = await invokeFunction('beheer-account-aanmaken', {
+        email: $('#p-email').value.trim(), fullName: $('#p-naam').value.trim(), role: $('#p-rol').value,
+        password: $('#p-wachtwoord').value.trim() || undefined,
+      });
+      $('#personeel-resultaat').hidden = false;
+      $('#personeel-resultaat').textContent = result.password ? `Account aangemaakt. Automatisch wachtwoord: ${result.password}` : 'Account aangemaakt.';
+      toast('Personeelslid toegevoegd.', 'good');
+      e.target.reset();
+      await laadPersoneel();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#klas-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#k-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('classes').insert({
+        school_id: profile.school_id, name: $('#k-naam').value.trim(), level: $('#k-niveau').value.trim() || null,
+        year: Number($('#k-jaar').value) || null, mentor_profile_id: $('#k-mentor').value || null,
+      });
+      if (error) throw error;
+      toast('Klas toegevoegd.', 'good');
+      closeModal('#klas-modal');
+      e.target.reset();
+      await Promise.all([laadKlassen(), vulSelects()]);
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#vak-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#v-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('subjects').insert({ school_id: profile.school_id, name: $('#v-naam').value.trim() });
+      if (error) throw error;
+      toast('Vak toegevoegd.', 'good');
+      closeModal('#vak-modal');
+      e.target.reset();
+      await Promise.all([laadVakken(), vulSelects()]);
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#cursus-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#c-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('courses').insert({
+        school_id: profile.school_id, subject_id: $('#c-vak').value, class_id: $('#c-klas').value,
+        teacher_profile_id: $('#c-docent').value || null, schooljaar: $('#c-jaar').value.trim() || null,
+      });
+      if (error) throw error;
+      toast('Cursus toegevoegd.', 'good');
+      closeModal('#cursus-modal');
+      e.target.reset();
+      await laadCursussen();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#leerling-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#l-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('students').insert({
+        school_id: profile.school_id, full_name: $('#l-naam').value.trim(), student_number: $('#l-nummer').value.trim() || null,
+        class_id: $('#l-klas').value || null,
+      });
+      if (error) throw error;
+      toast('Leerling toegevoegd.', 'good');
+      closeModal('#leerling-modal');
+      e.target.reset();
+      await Promise.all([laadLeerlingen(), vulSelects()]);
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#ouder-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#o-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { data: guardian, error: e1 } = await supabase.from('guardians').insert({
+        school_id: profile.school_id, full_name: $('#o-naam').value.trim(), email: $('#o-email').value.trim(),
+      }).select('guardian_id').single();
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from('student_guardians').insert({ student_id: $('#o-kind').value, guardian_id: guardian.guardian_id, relation: 'ouder' });
+      if (e2) throw e2;
+      toast('Ouder/verzorger toegevoegd.', 'good');
+      closeModal('#ouder-modal');
+      e.target.reset();
+      await laadOuders();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await Promise.all([laadPersoneel(), laadKlassen(), laadVakken(), laadCursussen(), laadLeerlingen(), laadOuders(), vulSelects()]);
+
+  async function vulSelects() {
+    const [{ data: personeel }, { data: klassen }, { data: vakken }, { data: leerlingen }] = await Promise.all([
+      supabase.from('profiles').select('id, full_name, role').order('full_name'),
+      supabase.from('classes').select('class_id, name').order('name'),
+      supabase.from('subjects').select('subject_id, name').order('name'),
+      supabase.from('students').select('student_id, full_name').order('full_name'),
+    ]);
+    const docenten = (personeel || []).filter((p) => ['vakdocent', 'mentor'].includes(p.role));
+    $('#k-mentor').innerHTML += (personeel || []).filter((p) => p.role === 'mentor').map((p) => `<option value="${p.id}">${escapeHtml(p.full_name)}</option>`).join('');
+    $('#c-docent').innerHTML = `<option value="">— geen —</option>` + docenten.map((p) => `<option value="${p.id}">${escapeHtml(p.full_name)}</option>`).join('');
+    $('#c-vak').innerHTML = (vakken || []).map((v) => `<option value="${v.subject_id}">${escapeHtml(v.name)}</option>`).join('');
+    $('#c-klas').innerHTML = (klassen || []).map((k) => `<option value="${k.class_id}">${escapeHtml(k.name)}</option>`).join('');
+    $('#l-klas').innerHTML += (klassen || []).map((k) => `<option value="${k.class_id}">${escapeHtml(k.name)}</option>`).join('');
+    $('#o-kind').innerHTML = (leerlingen || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+  }
+
+  async function laadPersoneel() {
+    const { data: rows, error } = await supabase.from('profiles').select('full_name, email, role').order('full_name');
+    if (error) { $('#personeel-body').innerHTML = `<tr><td colspan="3" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#personeel-body').innerHTML = (rows || []).map((r) => `<tr><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(ROLE_LABEL[r.role] || r.role)}</td></tr>`).join('')
+      || `<tr><td colspan="3" style="color:var(--text-muted);">Nog geen personeel.</td></tr>`;
+  }
+
+  async function laadKlassen() {
+    const { data: rows } = await supabase.from('classes').select('name, level, year, profiles(full_name)').order('name');
+    $('#klassen-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.level || '—')}</td><td>${r.year || '—'}</td><td>${escapeHtml(r.profiles?.full_name || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen klassen.</td></tr>`;
+  }
+
+  async function laadVakken() {
+    const { data: rows } = await supabase.from('subjects').select('name').order('name');
+    $('#vakken-body').innerHTML = (rows || []).length ? rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td></tr>`).join('') : `<tr><td style="color:var(--text-muted);">Nog geen vakken.</td></tr>`;
+  }
+
+  async function laadCursussen() {
+    const { data: rows } = await supabase.from('courses').select('schooljaar, subjects(name), classes(name), profiles(full_name)').order('created_at', { ascending: false });
+    $('#cursussen-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.subjects?.name || '—')}</td><td>${escapeHtml(r.classes?.name || '—')}</td><td>${escapeHtml(r.profiles?.full_name || '—')}</td><td>${escapeHtml(r.schooljaar || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen cursussen.</td></tr>`;
+  }
+
+  async function laadLeerlingen() {
+    const { data: rows } = await supabase.from('students').select('full_name, student_number, classes(name), profiles(full_name)').order('full_name').limit(100);
+    $('#leerlingen-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.student_number || '—')}</td><td>${escapeHtml(r.classes?.name || '—')}</td><td>${escapeHtml(r.profiles?.full_name || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen leerlingen.</td></tr>`;
+  }
+
+  async function laadOuders() {
+    const { data: rows } = await supabase.from('guardians').select('full_name, email, student_guardians(students(full_name))').order('full_name');
+    $('#ouders-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.email || '—')}</td><td>${escapeHtml((r.student_guardians || []).map((sg) => sg.students?.full_name).filter(Boolean).join(', ') || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">Nog geen ouders/verzorgers.</td></tr>`;
+  }
+</script>
+</body>
+</html>
