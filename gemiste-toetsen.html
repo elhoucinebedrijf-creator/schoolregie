@@ -114,6 +114,8 @@
     <div id="beoordeel-body"></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+      <button type="button" class="btn btn-ghost" id="btn-print-toets">Toets afdrukken/PDF</button>
+      <button type="button" class="btn btn-ghost" id="btn-print-antwoordmodel">Antwoordmodel afdrukken/PDF</button>
       <button type="button" class="btn btn-primary" id="btn-goedkeuren">Goedkeuren</button>
     </div>
   </div>
@@ -121,7 +123,7 @@
 
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
-  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError, printDocument } from '/assets/ui.js';
 
   const MODULE_ROLLEN = ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'];
   const ctx = await requireUser(MODULE_ROLLEN);
@@ -299,6 +301,8 @@
         <div class="field"><label>Inhaaltoets (concept)</label><textarea rows="8" readonly>${escapeHtml(variant?.content || '')}</textarea></div>
         <div class="field"><label>Antwoordmodel (concept)</label><textarea rows="6" readonly>${escapeHtml(model?.content || '')}</textarea></div>
       `;
+      $('#btn-print-toets').onclick = () => printDocument('Inhaaltoets (concept)', variant?.content || '', { Vak: '', Status: 'Nog te beoordelen' });
+      $('#btn-print-antwoordmodel').onclick = () => printDocument('Antwoordmodel (concept)', model?.content || '', { Status: 'Nog te beoordelen' });
       $('#btn-goedkeuren').onclick = async () => {
         const btn = $('#btn-goedkeuren');
         setLoading(btn, true, 'Bezig…');
@@ -379,6 +383,7 @@
     }
 
     const rows = [];
+    const teksten = new Map();
     for (const m of missed) {
       const makeup = Array.isArray(m.makeup_tests) ? m.makeup_tests[0] : m.makeup_tests;
       let toetstekst = '';
@@ -386,13 +391,21 @@
         const { data: doc } = await supabase.from('test_documents').select('content').eq('document_id', makeup.document_id).maybeSingle();
         toetstekst = doc?.content || '';
       }
+      teksten.set(m.missed_test_id, { naam: m.students?.full_name || '', tekst: toetstekst });
       rows.push(`<div class="card" style="margin-bottom:12px;">
         <div class="card-row"><h4>${escapeHtml(m.students?.full_name || '')}</h4>${statusBadge(makeup?.status || m.status)}</div>
         <p class="hint">Reden gemist: ${escapeHtml(m.reason || 'onbekend')}</p>
-        ${toetstekst ? `<div class="field"><label>Inhaaltoets</label><textarea rows="8" readonly>${escapeHtml(toetstekst)}</textarea></div>` : `<p class="hint">Nog geen goedgekeurde inhaaltoets beschikbaar.</p>`}
+        ${toetstekst
+          ? `<div class="field"><label>Inhaaltoets</label><textarea rows="8" readonly>${escapeHtml(toetstekst)}</textarea></div>
+             <button class="btn btn-sm btn-secondary" data-print-inhaaltoets="${m.missed_test_id}">Afdrukken/PDF</button>`
+          : `<p class="hint">Nog geen goedgekeurde inhaaltoets beschikbaar.</p>`}
       </div>`);
     }
     $('#student-rows').innerHTML = rows.join('');
+    $$('[data-print-inhaaltoets]').forEach((btn) => btn.addEventListener('click', () => {
+      const info = teksten.get(btn.dataset.printInhaaltoets);
+      printDocument('Inhaaltoets', info?.tekst || '', { Leerling: info?.naam || '' });
+    }));
   }
 </script>
 </body>

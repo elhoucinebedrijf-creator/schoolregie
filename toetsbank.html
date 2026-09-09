@@ -87,13 +87,16 @@
   <div class="modal modal--wide">
     <div class="modal-header"><h3>Documentinhoud</h3><button class="modal-close" data-close>&times;</button></div>
     <div id="bekijk-body"></div>
-    <div class="modal-actions"><button type="button" class="btn btn-secondary" data-close>Sluiten</button></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+      <button type="button" class="btn btn-primary" id="btn-print-document">Afdrukken/PDF</button>
+    </div>
   </div>
 </div>
 
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
-  import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError, printDocument } from '/assets/ui.js';
 
   const MODULE_ROLLEN = ['administrator', 'vakdocent', 'surveillant'];
   const ctx = await requireUser(MODULE_ROLLEN);
@@ -160,8 +163,9 @@
       : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen documenten.</td></tr>`;
 
     $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', async () => {
-      const { data: doc } = await supabase.from('test_documents').select('content').eq('document_id', btn.dataset.bekijk).maybeSingle();
+      const { data: doc } = await supabase.from('test_documents').select('content, kind, tests(title)').eq('document_id', btn.dataset.bekijk).maybeSingle();
       $('#bekijk-body').innerHTML = `<div class="field"><textarea rows="14" readonly>${escapeHtml(doc?.content || '')}</textarea></div>`;
+      $('#btn-print-document').onclick = () => printDocument(doc?.tests?.title || 'Toetsdocument', doc?.content || '', { Type: KIND_LABEL[doc?.kind] || doc?.kind || '' });
       openModal('#bekijk-modal');
     }));
   }

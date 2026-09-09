@@ -259,6 +259,15 @@ routes in `api/index.ts`: `scheduling/find-slot`, `supervision/today`,
   false` en status `goedgekeurd` (door een docent aangeleverd, geen
   AI-product) - in tegenstelling tot `ai_variant`-documenten uit de
   Fase-1-inhaaltoets-flow die altijd op `wacht_op_goedkeuring` staan.
+- **Afdrukken/PDF/printer**: `assets/ui.js` → `printDocument(title,
+  body, meta)` opent een schoon geformatteerd tabblad (geen
+  app-chrome/textarea-scrollclipping) en start automatisch het
+  browser-printvenster - dat heeft op elk platform altijd "Opslaan als
+  PDF" naast de echte printers, dus geen extra bibliotheek nodig.
+  Beschikbaar bij het beoordelen van een AI-inhaaltoets/antwoordmodel
+  (`gemiste-toetsen.html`), bij een goedgekeurde inhaaltoets in de
+  leerling/ouder-weergave, en bij elk toetsbankdocument
+  (`toetsbank.html`).
 
 ## Fase 6 - Management cockpit + import/koppelingen
 

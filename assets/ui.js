@@ -129,6 +129,41 @@ export function sortRows(rows, state, accessors) {
   return state.dir === 'desc' ? sorted.reverse() : sorted;
 }
 
+// Opent een schone, geformatteerde weergave in een nieuw tabblad en start
+// meteen het browser-printvenster - dat printvenster heeft op elk
+// besturingssysteem/browser altijd een "Opslaan als PDF"-optie naast de
+// echte printers, dus dit dekt afdrukken/PDF-opslaan/naar de printer
+// sturen zonder extra bibliotheek. Werkt op tekst uit een <textarea>
+// (die zelf niet goed print door de scrollbare hoogte) door de tekst in
+// gewone HTML te herschrijven.
+export function printDocument(title, bodyText, meta = {}) {
+  const win = window.open('', '_blank');
+  if (!win) { alert('Kon geen nieuw venster openen - controleer of pop-ups voor deze site zijn geblokkeerd.'); return; }
+  const metaHtml = Object.entries(meta)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<div class="meta-row"><strong>${escapeHtml(k)}:</strong> ${escapeHtml(v)}</div>`)
+    .join('');
+  win.document.write(`<!doctype html>
+<html lang="nl"><head><meta charset="UTF-8" /><title>${escapeHtml(title)}</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 720px; margin: 40px auto; padding: 0 24px 60px; color: #1a1a1a; line-height: 1.6; }
+  h1 { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 1.4rem; margin: 0 0 6px; }
+  .meta-row { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 0.85rem; color: #555; margin-bottom: 2px; }
+  .divider { border: none; border-top: 1px solid #ccc; margin: 16px 0 22px; }
+  .body-text { white-space: pre-wrap; font-size: 1.02rem; }
+  @media print { body { margin: 0; padding: 20px; } }
+</style>
+</head><body>
+  <h1>${escapeHtml(title)}</h1>
+  ${metaHtml}
+  <hr class="divider" />
+  <div class="body-text">${escapeHtml(bodyText || '(geen inhoud)')}</div>
+</body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
+}
+
 export function friendlyError(error) {
   if (!error) return 'Er ging iets mis.';
   const msg = error.message || String(error);
