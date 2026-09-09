@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Signalen & oudergesprekken - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link active" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Signalen & oudergesprekken</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="staff-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Signalen</h3><button class="btn btn-primary" id="btn-nieuw-signaal">+ Signaal melden</button></div>
+          <p class="hint">Bij hoog/kritiek wordt automatisch een mentor-taak, dossiernotitie en (via n8n) een oudergesprek-voorstel aangemaakt.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Niveau</th><th>Type</th><th>Toelichting</th><th>Status</th><th></th></tr></thead>
+            <tbody id="signalen-body"><tr><td colspan="6" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Oudergesprekken</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Datum/tijd</th><th>Bevestigd door ouder</th><th>Status</th><th></th></tr></thead>
+            <tbody id="gesprekken-body"><tr><td colspan="5" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-row"><h3>Communicatie ter goedkeuring</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Kanaal</th><th>Onderwerp</th><th>Bericht</th><th></th></tr></thead>
+            <tbody id="communicatie-body"><tr><td colspan="5" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="ouder-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Oudergesprekken</h3></div>
+          <div id="ouder-gesprekken"></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><h3>Berichten</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Onderwerp</th><th>Bericht</th><th>Kanaal</th></tr></thead>
+            <tbody id="ouder-berichten-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: signaal melden -->
+<div class="modal-backdrop" id="signaal-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Signaal melden</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="signaal-form">
+      <div class="field"><label for="s-student">Leerling</label><select id="s-student" required></select></div>
+      <div class="field"><label for="s-level">Niveau</label>
+        <select id="s-level">
+          <option value="laag">Laag</option><option value="middel">Middel</option>
+          <option value="hoog" selected>Hoog</option><option value="kritiek">Kritiek</option>
+        </select>
+      </div>
+      <div class="field"><label for="s-category">Type</label><input id="s-category" value="combinatie_verzuim_resultaten" /></div>
+      <div class="field"><label for="s-explanation">Toelichting</label><textarea id="s-explanation" rows="3" required></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="s-submit">Melden</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: datum voorstellen -->
+<div class="modal-backdrop" id="datum-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Datum/tijd voorstellen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="datum-form">
+      <input type="hidden" id="dm-conversation-id" />
+      <div class="field"><label for="dm-datetime">Datum en tijd</label><input type="datetime-local" id="dm-datetime" required /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="dm-submit">Voorstellen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: verslag + afronden -->
+<div class="modal-backdrop" id="verslag-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Verslag toevoegen & afronden</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="verslag-form">
+      <input type="hidden" id="vs-conversation-id" />
+      <div class="field"><label for="vs-note">Verslag</label><textarea id="vs-note" rows="5" required></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="vs-submit">Opslaan & afronden</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator', 'ouder'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+  const isStaff = profile.role !== 'ouder';
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const LEVEL_TONE = { laag: 'neutral', middel: 'warn', hoog: 'warn', kritiek: 'critical' };
+  const SIGNAL_STATUS_LABEL = { nieuw: 'Nieuw', in_behandeling: 'In behandeling', afgerond: 'Afgerond', geescaleerd: 'Geëscaleerd' };
+  const CONV_STATUS_LABEL = { nieuw: 'Voorgesteld', gepland: 'Gepland', afgerond: 'Afgerond', geannuleerd: 'Geannuleerd' };
+  const STATUS_TONE = { nieuw: 'warn', gepland: 'neutral', in_behandeling: 'neutral', afgerond: 'good', geescaleerd: 'critical', geannuleerd: 'neutral' };
+  const badge = (label, tone) => `<span class="badge badge--${tone || 'neutral'}">${escapeHtml(label)}</span>`;
+
+  if (isStaff) {
+    $('#staff-view').hidden = false;
+    await initStaffView();
+  } else {
+    $('#ouder-view').hidden = false;
+    await initOuderView();
+  }
+
+  async function initStaffView() {
+    const { data: students } = await supabase.from('students').select('student_id, full_name, mentor_profile_id').order('full_name');
+    $('#s-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+
+    $('#btn-nieuw-signaal').addEventListener('click', () => openModal('#signaal-modal'));
+
+    $('#signaal-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#s-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const studentId = $('#s-student').value;
+        const student = students.find((s) => s.student_id === studentId);
+        const level = $('#s-level').value;
+        const category = $('#s-category').value.trim() || 'combinatie_verzuim_resultaten';
+        const explanation = $('#s-explanation').value.trim();
+
+        const { data: signal, error: e1 } = await supabase.from('signals').insert({
+          school_id: profile.school_id, student_id: studentId, level, trigger_type: category, detail: explanation, status: 'nieuw',
+        }).select('signal_id').single();
+        if (e1) throw e1;
+
+        if (['hoog', 'kritiek'].includes(level) && student?.mentor_profile_id) {
+          await supabase.from('tasks').insert({
+            school_id: profile.school_id, title: `Groot signaal: bespreek ${student.full_name}`,
+            description: explanation, owner_profile_id: student.mentor_profile_id,
+            related_student_id: studentId, related_type: 'signal', related_id: signal.signal_id, status: 'nieuw',
+          });
+          await supabase.from('conversations').insert({
+            school_id: profile.school_id, student_id: studentId, kind: 'oudergesprek', proposed_by: profile.id, status: 'nieuw',
+          });
+        }
+        await supabase.from('dossier_entries').insert({
+          school_id: profile.school_id, student_id: studentId, entry_type: 'signaal', related_type: 'signal', related_id: signal.signal_id,
+          summary: `[${level}] ${category}: ${explanation}`, author_profile_id: profile.id,
+        });
+
+        toast('Signaal gemeld.', 'good');
+        closeModal('#signaal-modal');
+        e.target.reset();
+        $('#s-level').value = 'hoog';
+        $('#s-category').value = 'combinatie_verzuim_resultaten';
+        await Promise.all([laadSignalen(), laadGesprekken()]);
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    $('#datum-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#dm-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const { error } = await supabase.from('conversations').update({
+          scheduled_at: new Date($('#dm-datetime').value).toISOString(), status: 'gepland',
+        }).eq('conversation_id', $('#dm-conversation-id').value);
+        if (error) throw error;
+        toast('Datum/tijd voorgesteld.', 'good');
+        closeModal('#datum-modal');
+        await laadGesprekken();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    $('#verslag-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#vs-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const conversationId = $('#vs-conversation-id').value;
+        const { error: e1 } = await supabase.from('conversation_notes').insert({
+          conversation_id: conversationId, author_profile_id: profile.id, note: $('#vs-note').value.trim(),
+        });
+        if (e1) throw e1;
+        const { error: e2 } = await supabase.from('conversations').update({ status: 'afgerond' }).eq('conversation_id', conversationId);
+        if (e2) throw e2;
+        toast('Verslag opgeslagen, gesprek afgerond.', 'good');
+        closeModal('#verslag-modal');
+        e.target.reset();
+        await laadGesprekken();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    await Promise.all([laadSignalen(), laadGesprekken(), laadCommunicatie()]);
+
+    async function laadSignalen() {
+      const { data: rows, error } = await supabase
+        .from('signals')
+        .select('signal_id, level, trigger_type, detail, status, students(full_name)')
+        .order('created_at', { ascending: false });
+      if (error) { $('#signalen-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      $('#signalen-body').innerHTML = (rows || []).length
+        ? rows.map((r) => `<tr>
+            <td>${escapeHtml(r.students?.full_name || '—')}</td>
+            <td>${badge(r.level, LEVEL_TONE[r.level])}</td>
+            <td>${escapeHtml(r.trigger_type || '—')}</td>
+            <td>${escapeHtml(r.detail || '—')}</td>
+            <td>${badge(SIGNAL_STATUS_LABEL[r.status] || r.status, STATUS_TONE[r.status])}</td>
+            <td>${!['afgerond', 'geescaleerd'].includes(r.status)
+              ? `<button class="btn btn-sm btn-secondary" data-signaal-behandeling="${r.signal_id}">In behandeling</button> <button class="btn btn-sm btn-primary" data-signaal-afronden="${r.signal_id}">Afronden</button>`
+              : ''}</td>
+          </tr>`).join('')
+        : `<tr><td colspan="6" style="color:var(--text-muted);">Geen signalen.</td></tr>`;
+
+      $$('[data-signaal-behandeling]').forEach((btn) => btn.addEventListener('click', async () => {
+        await supabase.from('signals').update({ status: 'in_behandeling' }).eq('signal_id', btn.dataset.signaalBehandeling);
+        await laadSignalen();
+      }));
+      $$('[data-signaal-afronden]').forEach((btn) => btn.addEventListener('click', async () => {
+        await supabase.from('signals').update({ status: 'afgerond' }).eq('signal_id', btn.dataset.signaalAfronden);
+        await laadSignalen();
+      }));
+    }
+
+    async function laadGesprekken() {
+      const { data: rows, error } = await supabase
+        .from('conversations')
+        .select('conversation_id, scheduled_at, confirmed_by_guardian, status, students(full_name)')
+        .order('created_at', { ascending: false });
+      if (error) { $('#gesprekken-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      $('#gesprekken-body').innerHTML = (rows || []).length
+        ? rows.map((r) => {
+            let actie = '';
+            if (r.status === 'nieuw') actie = `<button class="btn btn-sm btn-secondary" data-datum="${r.conversation_id}">Datum voorstellen</button>`;
+            else if (r.status === 'gepland') actie = `<button class="btn btn-sm btn-primary" data-verslag="${r.conversation_id}">Verslag & afronden</button>`;
+            return `<tr>
+              <td>${escapeHtml(r.students?.full_name || '—')}</td>
+              <td>${r.scheduled_at ? formatDateTime(r.scheduled_at) : '—'}</td>
+              <td>${r.confirmed_by_guardian ? badge('Ja', 'good') : badge('Nog niet', 'neutral')}</td>
+              <td>${badge(CONV_STATUS_LABEL[r.status] || r.status, STATUS_TONE[r.status])}</td>
+              <td>${actie}</td>
+            </tr>`;
+          }).join('')
+        : `<tr><td colspan="5" style="color:var(--text-muted);">Geen oudergesprekken.</td></tr>`;
+
+      $$('[data-datum]').forEach((btn) => btn.addEventListener('click', () => {
+        $('#dm-conversation-id').value = btn.dataset.datum;
+        openModal('#datum-modal');
+      }));
+      $$('[data-verslag]').forEach((btn) => btn.addEventListener('click', () => {
+        $('#vs-conversation-id').value = btn.dataset.verslag;
+        openModal('#verslag-modal');
+      }));
+    }
+
+    async function laadCommunicatie() {
+      const { data: rows, error } = await supabase
+        .from('communications')
+        .select('communication_id, channel, subject, body, students(full_name)')
+        .eq('status', 'wacht_op_goedkeuring')
+        .order('created_at', { ascending: false });
+      if (error) { $('#communicatie-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      $('#communicatie-body').innerHTML = (rows || []).length
+        ? rows.map((r) => `<tr>
+            <td>${escapeHtml(r.students?.full_name || '—')}</td>
+            <td>${escapeHtml(r.channel || '—')}</td>
+            <td>${escapeHtml(r.subject || '—')}</td>
+            <td>${escapeHtml(r.body || '—')}</td>
+            <td><button class="btn btn-sm btn-primary" data-verzonden="${r.communication_id}">Markeer als verzonden</button></td>
+          </tr>`).join('')
+        : `<tr><td colspan="5" style="color:var(--text-muted);">Niets ter goedkeuring.</td></tr>`;
+
+      $$('[data-verzonden]').forEach((btn) => btn.addEventListener('click', async () => {
+        await supabase.from('communications').update({ status: 'afgerond', sent_at: new Date().toISOString() }).eq('communication_id', btn.dataset.verzonden);
+        toast('Gemarkeerd als verzonden.', 'good');
+        await laadCommunicatie();
+      }));
+    }
+  }
+
+  async function initOuderView() {
+    const { data: gesprekken } = await supabase
+      .from('conversations')
+      .select('conversation_id, scheduled_at, confirmed_by_guardian, status, students(full_name)')
+      .order('created_at', { ascending: false });
+    $('#ouder-gesprekken').innerHTML = (gesprekken || []).length
+      ? gesprekken.map((r) => `<div class="card" style="margin-bottom:8px;">
+          <div class="card-row"><strong>${escapeHtml(r.students?.full_name || '')}</strong>${badge(CONV_STATUS_LABEL[r.status] || r.status, STATUS_TONE[r.status])}</div>
+          <p class="hint">${r.scheduled_at ? `Voorgesteld: ${formatDateTime(r.scheduled_at)}` : 'Nog geen datum/tijd voorgesteld.'}</p>
+          ${r.scheduled_at && !r.confirmed_by_guardian ? `<button class="btn btn-sm btn-primary" data-bevestig="${r.conversation_id}">Bevestigen</button>` : ''}
+          ${r.confirmed_by_guardian ? `<p class="hint">Bevestigd.</p>` : ''}
+        </div>`).join('')
+      : `<p class="hint">Geen oudergesprekken.</p>`;
+
+    $$('[data-bevestig]').forEach((btn) => btn.addEventListener('click', async () => {
+      setLoading(btn, true, 'Bezig…');
+      try {
+        await invokeFunction('bevestig-oudergesprek', { conversationId: btn.dataset.bevestig });
+        toast('Bevestigd.', 'good');
+        await initOuderView();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+        setLoading(btn, false);
+      }
+    }));
+
+    const { data: berichten } = await supabase
+      .from('communications')
+      .select('subject, body, channel')
+      .order('created_at', { ascending: false });
+    $('#ouder-berichten-body').innerHTML = (berichten || []).length
+      ? berichten.map((b) => `<tr><td>${escapeHtml(b.subject || '—')}</td><td>${escapeHtml(b.body || '—')}</td><td>${escapeHtml(b.channel || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">Geen berichten.</td></tr>`;
+  }
+</script>
+</body>
+</html>

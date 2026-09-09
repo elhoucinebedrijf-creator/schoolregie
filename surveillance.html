@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Surveillance - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link active" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Surveillance - vandaag</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <p class="hint" style="margin-bottom:14px;">Bij "Niet verschenen" wordt automatisch een nieuwe inhaalpoging klaargezet - tenzij dit al de 2e keer is, dan gaat er in plaats daarvan een kritiek signaal naar de mentor/zorgcoördinator.</p>
+      <div id="slots-list"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'surveillant'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  const NO_SHOW_THRESHOLD = 2;
+
+  await laadSlots();
+
+  async function laadSlots() {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    let query = supabase
+      .from('makeup_slots')
+      .select('makeup_slot_id, starts_at, ends_at, location, makeup_tests(makeup_test_id, status, no_show_count, missed_test_id, missed_tests(student_id, students(full_name)))')
+      .gte('starts_at', todayStart.toISOString())
+      .lte('starts_at', todayEnd.toISOString())
+      .order('starts_at', { ascending: true });
+    if (profile.role === 'surveillant') query = query.eq('supervisor_profile_id', profile.id);
+    const { data: slots, error } = await query;
+    if (error) { $('#slots-list').innerHTML = `<p class="hint">${escapeHtml(friendlyError(error))}</p>`; return; }
+
+    if (!slots || !slots.length) {
+      $('#slots-list').innerHTML = `<p class="hint">Geen inhaalmomenten vandaag.</p>`;
+      return;
+    }
+
+    $('#slots-list').innerHTML = slots.map((slot) => {
+      const klaar = (slot.makeup_tests || []).filter((m) => m.status === 'klaargezet_voor_afname');
+      const rows = klaar.length
+        ? klaar.map((m) => `<tr>
+            <td>${escapeHtml(m.missed_tests?.students?.full_name || '—')}</td>
+            <td>
+              <button class="btn btn-sm btn-primary" data-afgerond="${m.makeup_test_id}">Aanwezig - afronden</button>
+              <button class="btn btn-sm btn-danger" data-noshow="${m.makeup_test_id}" data-missed="${m.missed_test_id}" data-student="${m.missed_tests?.student_id || ''}" data-count="${m.no_show_count}">Niet verschenen</button>
+            </td>
+          </tr>`).join('')
+        : `<tr><td colspan="2" style="color:var(--text-muted);">Geen leerlingen klaargezet voor dit moment.</td></tr>`;
+      return `<div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>${formatDateTime(slot.starts_at)} - ${escapeHtml(slot.location || 'geen lokaal')}</h3></div>
+        <div class="table-wrap"><table><thead><tr><th>Leerling</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      </div>`;
+    }).join('');
+
+    $$('[data-afgerond]').forEach((btn) => btn.addEventListener('click', async () => {
+      setLoading(btn, true, 'Bezig…');
+      const { error: e } = await supabase.from('makeup_tests').update({ status: 'afgerond' }).eq('makeup_test_id', btn.dataset.afgerond);
+      if (e) { toast(friendlyError(e), 'critical'); setLoading(btn, false); return; }
+      toast('Afname afgerond.', 'good');
+      await laadSlots();
+    }));
+
+    $$('[data-noshow]').forEach((btn) => btn.addEventListener('click', async () => {
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const makeupTestId = btn.dataset.noshow;
+        const missedTestId = btn.dataset.missed;
+        const studentId = btn.dataset.student;
+        const nieuwAantal = Number(btn.dataset.count) + 1;
+
+        const { error: e1 } = await supabase.from('makeup_tests').update({ status: 'no_show', no_show_count: nieuwAantal }).eq('makeup_test_id', makeupTestId);
+        if (e1) throw e1;
+
+        if (nieuwAantal < NO_SHOW_THRESHOLD) {
+          const { error: e2 } = await supabase.from('makeup_tests').insert({ school_id: profile.school_id, missed_test_id: missedTestId, status: 'nieuw' });
+          if (e2) throw e2;
+          toast('Niet verschenen geregistreerd - nieuwe inhaalpoging klaargezet.', 'warn');
+        } else {
+          const { error: e2 } = await supabase.from('signals').insert({
+            school_id: profile.school_id, student_id: studentId, level: 'kritiek', trigger_type: 'herhaald_no_show',
+            detail: `Leerling is ${nieuwAantal}x niet verschenen bij een inhaaltoets.`, status: 'nieuw',
+          });
+          if (e2) throw e2;
+          const { error: e3 } = await supabase.from('missed_tests').update({ status: 'geescaleerd' }).eq('missed_test_id', missedTestId);
+          if (e3) throw e3;
+          toast('Herhaald niet verschenen - geëscaleerd naar een kritiek signaal.', 'critical');
+        }
+        await laadSlots();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+        setLoading(btn, false);
+      }
+    }));
+  }
+</script>
+</body>
+</html>

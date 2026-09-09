@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maatwerk - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link active" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Maatwerk</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="staff-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Maatwerkadviezen</h3><button class="btn btn-primary" id="btn-nieuw">+ AI-advies genereren</button></div>
+          <p class="hint">De AI adviseert per vak - een mentor bevestigt altijd voordat een leerling daadwerkelijk wordt ingepland.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Vak</th><th>Toelichting</th><th>Status</th><th></th></tr></thead>
+            <tbody id="rows-body"><tr><td colspan="5" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="student-view" hidden>
+        <div class="card">
+          <div class="card-row"><h3>Maatwerk voor jou</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Vak</th><th>Toelichting</th><th>Status</th></tr></thead>
+            <tbody id="own-rows-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: AI-advies genereren -->
+<div class="modal-backdrop" id="genereer-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>AI-maatwerkadvies genereren</h3><button class="modal-close" data-close>&times;</button></div>
+    <p class="hint">De AI beoordeelt de opgegeven cijfers per vak en adviseert waar maatwerkbegeleiding zinvol is.</p>
+    <form id="genereer-form">
+      <div class="field"><label for="g-student">Leerling</label><select id="g-student" required></select></div>
+      <div class="field"><label for="g-period">Periode</label><input id="g-period" placeholder="Bijv. periode 2, 2025-2026" /></div>
+      <div class="field">
+        <label>Cijfers</label>
+        <div id="g-grades"></div>
+        <button type="button" class="btn btn-sm btn-secondary" id="g-add-grade">+ Cijfer toevoegen</button>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="g-submit">Advies genereren</button>
+      </div>
+    </form>
+    <div id="genereer-resultaat" hidden>
+      <hr />
+      <p class="hint" id="g-samenvatting"></p>
+      <div id="g-adviezen"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'mentor', 'vakdocent', 'teamleider', 'leerling', 'ouder'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+  const isStaff = !['ouder', 'leerling'].includes(profile.role);
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const STATUS_LABEL = { nieuw: 'Wacht op mentor', gepland: 'Gepland', goedgekeurd: 'Goedgekeurd', afgerond: 'Afgerond', geannuleerd: 'Afgewezen' };
+  const STATUS_TONE = { nieuw: 'warn', goedgekeurd: 'good', afgerond: 'good', geannuleerd: 'neutral' };
+  function statusBadge(status) {
+    return `<span class="badge badge--${STATUS_TONE[status] || 'neutral'}">${escapeHtml(STATUS_LABEL[status] || status)}</span>`;
+  }
+
+  if (isStaff) {
+    $('#staff-view').hidden = false;
+    await initStaffView();
+  } else {
+    $('#student-view').hidden = false;
+    await initStudentView();
+  }
+
+  function addGradeRow(subjects) {
+    const row = document.createElement('div');
+    row.className = 'form-row grade-row';
+    row.innerHTML = `
+      <select class="g-vak">${subjects.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('')}</select>
+      <input class="g-cijfer" type="number" step="0.1" min="1" max="10" placeholder="Cijfer" required />
+      <button type="button" class="btn btn-sm btn-ghost g-remove">✕</button>
+    `;
+    row.querySelector('.g-remove').addEventListener('click', () => row.remove());
+    $('#g-grades').appendChild(row);
+  }
+
+  async function initStaffView() {
+    const [{ data: students }, { data: subjects }] = await Promise.all([
+      supabase.from('students').select('student_id, full_name').order('full_name'),
+      supabase.from('subjects').select('subject_id, name').order('name'),
+    ]);
+    $('#g-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+    addGradeRow(subjects || []);
+    $('#g-add-grade').addEventListener('click', () => addGradeRow(subjects || []));
+
+    $('#btn-nieuw').addEventListener('click', () => {
+      $('#genereer-resultaat').hidden = true;
+      openModal('#genereer-modal');
+    });
+
+    $('#genereer-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#g-submit');
+      setLoading(btn, true, 'AI beoordeelt…');
+      try {
+        const grades = $$('.grade-row').map((row) => ({ subject: row.querySelector('.g-vak').value, grade: Number(row.querySelector('.g-cijfer').value) }));
+        if (!grades.length) throw new Error('Voeg minstens één cijfer toe.');
+        const result = await invokeFunction('genereer-maatwerkadvies', { studentId: $('#g-student').value, period: $('#g-period').value.trim(), grades });
+        $('#g-samenvatting').textContent = result.samenvatting || '';
+        $('#g-adviezen').innerHTML = (result.adviezen || []).map((a) => `
+          <div class="card" style="margin-bottom:8px;">
+            <div class="card-row"><strong>${escapeHtml(a.vak)}</strong><span class="badge badge--${a.nodig ? 'warn' : 'good'}">${a.nodig ? 'Maatwerk geadviseerd' : 'Geen actie nodig'}</span></div>
+            <p class="hint">${escapeHtml(a.reden || '')} ${a.confidence != null ? `(confidence: ${Math.round(a.confidence * 100)}%)` : ''}</p>
+          </div>`).join('');
+        $('#genereer-resultaat').hidden = false;
+        toast(`${result.created?.length || 0} maatwerkadvies(en) aangemaakt - wacht op mentor-goedkeuring.`, 'good');
+        await laadRijen();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    await laadRijen();
+
+    async function laadRijen() {
+      const { data: rows, error } = await supabase
+        .from('maatwerk_assignments')
+        .select('assignment_id, status, mentor_approved, advice_reason, students(full_name), subjects(name)')
+        .order('created_at', { ascending: false });
+      if (error) { $('#rows-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      $('#rows-body').innerHTML = (rows || []).length
+        ? rows.map((r) => `<tr>
+            <td>${escapeHtml(r.students?.full_name || '—')}</td>
+            <td>${escapeHtml(r.subjects?.name || '—')}</td>
+            <td>${escapeHtml(r.advice_reason || '—')}</td>
+            <td>${statusBadge(r.status)}</td>
+            <td>${!r.mentor_approved && r.status === 'nieuw'
+              ? `<button class="btn btn-sm btn-primary" data-goedkeuren="${r.assignment_id}">Goedkeuren</button> <button class="btn btn-sm btn-ghost" data-afwijzen="${r.assignment_id}">Afwijzen</button>`
+              : ''}</td>
+          </tr>`).join('')
+        : `<tr><td colspan="5" style="color:var(--text-muted);">Nog geen maatwerkadviezen.</td></tr>`;
+
+      $$('[data-goedkeuren]').forEach((btn) => btn.addEventListener('click', async () => {
+        const { error } = await supabase.from('maatwerk_assignments').update({ status: 'goedgekeurd', mentor_approved: true }).eq('assignment_id', btn.dataset.goedkeuren);
+        if (error) { toast(friendlyError(error), 'critical'); return; }
+        toast('Maatwerk goedgekeurd.', 'good');
+        await laadRijen();
+      }));
+      $$('[data-afwijzen]').forEach((btn) => btn.addEventListener('click', async () => {
+        const { error } = await supabase.from('maatwerk_assignments').update({ status: 'geannuleerd' }).eq('assignment_id', btn.dataset.afwijzen);
+        if (error) { toast(friendlyError(error), 'critical'); return; }
+        await laadRijen();
+      }));
+    }
+  }
+
+  async function initStudentView() {
+    const { data: rows, error } = await supabase
+      .from('maatwerk_assignments')
+      .select('status, advice_reason, subjects(name)')
+      .order('created_at', { ascending: false });
+    if (error) { $('#own-rows-body').innerHTML = `<tr><td colspan="3" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#own-rows-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.subjects?.name || '—')}</td><td>${escapeHtml(r.advice_reason || '—')}</td><td>${statusBadge(r.status)}</td></tr>`).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">Geen maatwerk.</td></tr>`;
+  }
+</script>
+</body>
+</html>

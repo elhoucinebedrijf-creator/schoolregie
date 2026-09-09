@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rooster & capaciteit - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link active" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Rooster & capaciteit</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>Inhaalmomenten (toetsen)</h3><button class="btn btn-primary" id="btn-nieuw-makeup">+ Moment toevoegen</button></div>
+        <p class="hint">"Scheduling/find-slot" (n8n) en de "Inplannen"-knop op Gemiste toetsen kiezen automatisch het eerstvolgende moment met vrije capaciteit.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Datum/tijd</th><th>Lokaal</th><th>Surveillant</th><th>Bezet</th></tr></thead>
+          <tbody id="makeup-slots-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-row"><h3>Maatwerkmomenten</h3><button class="btn btn-primary" id="btn-nieuw-maatwerk">+ Moment toevoegen</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Datum/tijd</th><th>Vak</th><th>Docent</th><th>Bezet</th></tr></thead>
+          <tbody id="maatwerk-slots-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: inhaalmoment toevoegen -->
+<div class="modal-backdrop" id="makeup-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Inhaalmoment toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="makeup-form">
+      <div class="form-row">
+        <div class="field"><label for="m-start">Start</label><input type="datetime-local" id="m-start" required /></div>
+        <div class="field"><label for="m-end">Einde</label><input type="datetime-local" id="m-end" required /></div>
+      </div>
+      <div class="field"><label for="m-location">Lokaal</label><input id="m-location" /></div>
+      <div class="field"><label for="m-supervisor">Surveillant</label><select id="m-supervisor"></select></div>
+      <div class="field"><label for="m-capacity">Capaciteit</label><input type="number" id="m-capacity" min="1" value="3" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="m-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: maatwerkmoment toevoegen -->
+<div class="modal-backdrop" id="maatwerk-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Maatwerkmoment toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="maatwerk-form">
+      <div class="form-row">
+        <div class="field"><label for="w-start">Start</label><input type="datetime-local" id="w-start" required /></div>
+        <div class="field"><label for="w-end">Einde</label><input type="datetime-local" id="w-end" required /></div>
+      </div>
+      <div class="field"><label for="w-subject">Vak</label><select id="w-subject"></select></div>
+      <div class="field"><label for="w-teacher">Docent</label><select id="w-teacher"></select></div>
+      <div class="field"><label for="w-capacity">Capaciteit</label><input type="number" id="w-capacity" min="1" value="4" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="w-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'teamleider'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const [{ data: surveillanten }, { data: subjects }, { data: docenten }] = await Promise.all([
+    supabase.from('profiles').select('id, full_name').eq('role', 'surveillant'),
+    supabase.from('subjects').select('subject_id, name').order('name'),
+    supabase.from('profiles').select('id, full_name').eq('role', 'vakdocent'),
+  ]);
+  $('#m-supervisor').innerHTML = (surveillanten || []).map((s) => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('');
+  $('#w-subject').innerHTML = (subjects || []).map((s) => `<option value="${s.subject_id}">${escapeHtml(s.name)}</option>`).join('');
+  $('#w-teacher').innerHTML = (docenten || []).map((d) => `<option value="${d.id}">${escapeHtml(d.full_name)}</option>`).join('');
+
+  $('#btn-nieuw-makeup').addEventListener('click', () => openModal('#makeup-modal'));
+  $('#btn-nieuw-maatwerk').addEventListener('click', () => openModal('#maatwerk-modal'));
+
+  $('#makeup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#m-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('makeup_slots').insert({
+        school_id: profile.school_id, starts_at: new Date($('#m-start').value).toISOString(), ends_at: new Date($('#m-end').value).toISOString(),
+        location: $('#m-location').value.trim() || null, supervisor_profile_id: $('#m-supervisor').value || null, capacity: Number($('#m-capacity').value) || 1,
+      });
+      if (error) throw error;
+      toast('Inhaalmoment toegevoegd.', 'good');
+      closeModal('#makeup-modal');
+      e.target.reset();
+      await laadMakeupSlots();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#maatwerk-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#w-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { error } = await supabase.from('maatwerk_slots').insert({
+        school_id: profile.school_id, starts_at: new Date($('#w-start').value).toISOString(), ends_at: new Date($('#w-end').value).toISOString(),
+        subject_id: $('#w-subject').value || null, teacher_profile_id: $('#w-teacher').value || null, capacity: Number($('#w-capacity').value) || 1,
+      });
+      if (error) throw error;
+      toast('Maatwerkmoment toegevoegd.', 'good');
+      closeModal('#maatwerk-modal');
+      e.target.reset();
+      await laadMaatwerkSlots();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await Promise.all([laadMakeupSlots(), laadMaatwerkSlots()]);
+
+  async function laadMakeupSlots() {
+    const { data: slots, error } = await supabase
+      .from('makeup_slots')
+      .select('makeup_slot_id, starts_at, location, capacity, profiles(full_name), makeup_tests(makeup_test_id)')
+      .gte('starts_at', new Date().toISOString())
+      .order('starts_at', { ascending: true })
+      .limit(30);
+    if (error) { $('#makeup-slots-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#makeup-slots-body').innerHTML = (slots || []).length
+      ? slots.map((s) => `<tr>
+          <td>${formatDateTime(s.starts_at)}</td>
+          <td>${escapeHtml(s.location || '—')}</td>
+          <td>${escapeHtml(s.profiles?.full_name || 'Niet toegewezen')}</td>
+          <td>${(s.makeup_tests || []).length} / ${s.capacity}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Geen aankomende inhaalmomenten.</td></tr>`;
+  }
+
+  async function laadMaatwerkSlots() {
+    const { data: slots, error } = await supabase
+      .from('maatwerk_slots')
+      .select('maatwerk_slot_id, starts_at, capacity, subjects(name), profiles(full_name), maatwerk_assignments(assignment_id)')
+      .gte('starts_at', new Date().toISOString())
+      .order('starts_at', { ascending: true })
+      .limit(30);
+    if (error) { $('#maatwerk-slots-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#maatwerk-slots-body').innerHTML = (slots || []).length
+      ? slots.map((s) => `<tr>
+          <td>${formatDateTime(s.starts_at)}</td>
+          <td>${escapeHtml(s.subjects?.name || '—')}</td>
+          <td>${escapeHtml(s.profiles?.full_name || '—')}</td>
+          <td>${(s.maatwerk_assignments || []).length} / ${s.capacity}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Geen aankomende maatwerkmomenten.</td></tr>`;
+  }
+</script>
+</body>
+</html>

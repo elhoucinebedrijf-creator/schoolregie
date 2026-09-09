@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Import & koppelingen - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link active" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Import & koppelingen</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>CSV importeren</h3></div>
+        <div class="form-row">
+          <div class="field"><label for="i-kind">Type</label>
+            <select id="i-kind">
+              <option value="leerlingen">Leerlingen</option>
+              <option value="verzuim">Verzuim</option>
+              <option value="ouders">Ouders</option>
+              <option value="docenten">Docenten</option>
+              <option value="klassen">Klassen</option>
+              <option value="vakken">Vakken</option>
+              <option value="cijfers">Cijfers</option>
+              <option value="rooster">Rooster</option>
+            </select>
+          </div>
+          <div class="field"><label for="i-file">CSV-bestand</label><input type="file" id="i-file" accept=".csv" /></div>
+        </div>
+        <p class="hint" id="i-hint"></p>
+        <div class="table-wrap"><table><thead id="preview-head"></thead><tbody id="preview-body"></tbody></table></div>
+        <button class="btn btn-primary" id="btn-importeren" style="margin-top:12px;" disabled>Importeren</button>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>Importgeschiedenis</h3></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Type</th><th>Bestand</th><th>Verwerkt</th><th>Fouten</th><th>Status</th><th>Datum</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-row"><h3>Koppelingen</h3></div>
+        <p class="hint">Architectuur voorbereid voor deze systemen - nog niet actief gekoppeld. WF15 (Magister/Somtoday-import) verwerkt leerlingen en verzuim al automatisch zodra de koppeling gezet wordt.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Systeem</th><th>Status</th></tr></thead>
+          <tbody id="integrations-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  const VERWERKBARE_TYPES = ['leerlingen', 'verzuim'];
+  const PROVIDERS = ['magister', 'somtoday', 'zermelo', 'untis', 'google_calendar', 'outlook', 'teams', 'email', 'sms', 'whatsapp'];
+
+  const ALIAS_MAP = {
+    leerlingen: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], fullName: ['naam', 'volledige naam', 'leerling'], className: ['klas'], level: ['niveau'], year: ['leerjaar', 'jaar'] },
+    verzuim: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], eventType: ['type', 'soort'], eventDate: ['datum'] },
+  };
+
+  function parseCsv(text) {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return { headers: [], rows: [] };
+    const splitLine = (line) => line.split(/[;,]/).map((c) => c.trim().replace(/^"|"$/g, ''));
+    const headers = splitLine(lines[0]);
+    const rows = lines.slice(1).map((line) => {
+      const cells = splitLine(line);
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = cells[i] ?? ''; });
+      return obj;
+    });
+    return { headers, rows };
+  }
+
+  function matchAlias(headers, aliases) {
+    const lower = headers.map((h) => h.toLowerCase());
+    for (const alias of aliases) {
+      const idx = lower.indexOf(alias.toLowerCase());
+      if (idx !== -1) return headers[idx];
+    }
+    return null;
+  }
+
+  let huidigeRows = [];
+  let huidigeHeaders = [];
+
+  $('#i-file').addEventListener('change', async () => {
+    const file = $('#i-file').files[0];
+    if (!file) return;
+    const text = await file.text();
+    const { headers, rows } = parseCsv(text);
+    huidigeRows = rows;
+    huidigeHeaders = headers;
+    renderPreview();
+  });
+  $('#i-kind').addEventListener('change', renderPreview);
+
+  function renderPreview() {
+    const kind = $('#i-kind').value;
+    const verwerkbaar = VERWERKBARE_TYPES.includes(kind);
+    $('#i-hint').textContent = verwerkbaar
+      ? 'Dit type wordt automatisch verwerkt en direct in de database bijgewerkt.'
+      : 'Dit type wordt nog niet automatisch verwerkt - het bestand wordt alleen geregistreerd in de importgeschiedenis.';
+    $('#btn-importeren').disabled = !huidigeRows.length;
+
+    if (!huidigeHeaders.length) { $('#preview-head').innerHTML = ''; $('#preview-body').innerHTML = ''; return; }
+    $('#preview-head').innerHTML = `<tr>${huidigeHeaders.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
+    $('#preview-body').innerHTML = huidigeRows.slice(0, 5).map((r) => `<tr>${huidigeHeaders.map((h) => `<td>${escapeHtml(r[h])}</td>`).join('')}</tr>`).join('')
+      + (huidigeRows.length > 5 ? `<tr><td colspan="${huidigeHeaders.length}" style="color:var(--text-muted);">… en ${huidigeRows.length - 5} meer</td></tr>` : '');
+  }
+
+  $('#btn-importeren').addEventListener('click', async () => {
+    const btn = $('#btn-importeren');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const kind = $('#i-kind').value;
+      const filename = $('#i-file').files[0]?.name || 'onbekend.csv';
+      let verwerkt = 0;
+      let fouten = 0;
+
+      if (kind === 'leerlingen') {
+        const aliases = ALIAS_MAP.leerlingen;
+        const kolomStudentNr = matchAlias(huidigeHeaders, aliases.studentNumber);
+        const kolomNaam = matchAlias(huidigeHeaders, aliases.fullName);
+        const kolomKlas = matchAlias(huidigeHeaders, aliases.className);
+        const kolomNiveau = matchAlias(huidigeHeaders, aliases.level);
+        const kolomJaar = matchAlias(huidigeHeaders, aliases.year);
+        const { data: klassen } = await supabase.from('classes').select('class_id, name').eq('school_id', profile.school_id);
+        const klasPerNaam = new Map((klassen || []).map((k) => [k.name, k.class_id]));
+
+        for (const r of huidigeRows) {
+          const fullName = kolomNaam ? r[kolomNaam] : null;
+          if (!fullName) { fouten++; continue; }
+          const studentNumber = kolomStudentNr ? r[kolomStudentNr] : null;
+          const classId = kolomKlas && r[kolomKlas] ? klasPerNaam.get(r[kolomKlas]) || null : null;
+          const { data: bestaand } = studentNumber
+            ? await supabase.from('students').select('student_id').eq('school_id', profile.school_id).eq('student_number', studentNumber).maybeSingle()
+            : { data: null };
+          const payload = { full_name: fullName, class_id: classId, level: kolomNiveau ? r[kolomNiveau] || null : null, year: kolomJaar ? Number(r[kolomJaar]) || null : null };
+          const { error } = bestaand
+            ? await supabase.from('students').update(payload).eq('student_id', bestaand.student_id)
+            : await supabase.from('students').insert({ school_id: profile.school_id, student_number: studentNumber || null, ...payload });
+          if (error) fouten++; else verwerkt++;
+        }
+      } else if (kind === 'verzuim') {
+        const aliases = ALIAS_MAP.verzuim;
+        const kolomStudentNr = matchAlias(huidigeHeaders, aliases.studentNumber);
+        const kolomType = matchAlias(huidigeHeaders, aliases.eventType);
+        const kolomDatum = matchAlias(huidigeHeaders, aliases.eventDate);
+        for (const r of huidigeRows) {
+          const studentNumber = kolomStudentNr ? r[kolomStudentNr] : null;
+          const eventType = kolomType ? r[kolomType] : null;
+          if (!studentNumber || !eventType) { fouten++; continue; }
+          const { data: student } = await supabase.from('students').select('student_id').eq('school_id', profile.school_id).eq('student_number', studentNumber).maybeSingle();
+          if (!student) { fouten++; continue; }
+          const { error } = await supabase.from('attendance_events').insert({
+            school_id: profile.school_id, student_id: student.student_id, event_type: eventType,
+            event_date: (kolomDatum ? r[kolomDatum] : null) || new Date().toISOString().slice(0, 10), note: `CSV-import (${filename})`,
+          });
+          if (error) fouten++; else verwerkt++;
+        }
+      }
+
+      const { error: importError } = await supabase.from('imports').insert({
+        school_id: profile.school_id, kind, filename, status: VERWERKBARE_TYPES.includes(kind) ? 'afgerond' : 'nieuw',
+        imported_count: verwerkt, error_count: VERWERKBARE_TYPES.includes(kind) ? fouten : 0, imported_by: profile.id,
+      });
+      if (importError) throw importError;
+
+      toast(VERWERKBARE_TYPES.includes(kind) ? `${verwerkt} rijen verwerkt, ${fouten} fouten.` : 'Bestand geregistreerd (nog niet automatisch verwerkt voor dit type).', 'good');
+      $('#i-file').value = '';
+      huidigeRows = []; huidigeHeaders = [];
+      renderPreview();
+      await laadGeschiedenis();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await laadGeschiedenis();
+  await laadKoppelingen();
+
+  async function laadGeschiedenis() {
+    const { data: rows, error } = await supabase.from('imports').select('kind, filename, imported_count, error_count, status, created_at').order('created_at', { ascending: false }).limit(20);
+    if (error) { $('#history-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#history-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.filename || '—')}</td><td>${r.imported_count}</td><td>${r.error_count}</td><td>${escapeHtml(r.status)}</td><td>${formatDateTime(r.created_at)}</td></tr>`).join('')
+      : `<tr><td colspan="6" style="color:var(--text-muted);">Nog geen imports.</td></tr>`;
+  }
+
+  async function laadKoppelingen() {
+    const { data: rows } = await supabase.from('integrations').select('provider, status').eq('school_id', profile.school_id);
+    const statusPerProvider = new Map((rows || []).map((r) => [r.provider, r.status]));
+    $('#integrations-body').innerHTML = PROVIDERS.map((p) => `<tr><td>${escapeHtml(p)}</td><td><span class="badge badge--neutral">${escapeHtml(statusPerProvider.get(p) || 'niet_gekoppeld')}</span></td></tr>`).join('');
+  }
+</script>
+</body>
+</html>

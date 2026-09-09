@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Toetsbank - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link active" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Toetsbank</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card">
+        <div class="card-row"><h3>Documenten</h3><button class="btn btn-primary" id="btn-nieuw">+ Document toevoegen</button></div>
+        <p class="hint">Originele toetsen en antwoordmodellen die je hier toevoegt staan direct als goedgekeurd - AI-varianten uit de inhaaltoets-flow (Gemiste toetsen) wachten altijd eerst op beoordeling door de vakdocent.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Toets</th><th>Type</th><th>Status</th><th>Inhoud</th></tr></thead>
+          <tbody id="docs-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: document toevoegen -->
+<div class="modal-backdrop" id="nieuw-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>Document toevoegen</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="nieuw-form">
+      <div class="field"><label for="d-test">Toets</label><select id="d-test" required></select></div>
+      <div class="field"><label for="d-type">Type</label>
+        <select id="d-type">
+          <option value="originele_toets">Originele toets</option>
+          <option value="antwoordmodel">Antwoordmodel</option>
+        </select>
+      </div>
+      <div class="field"><label for="d-objectives">Leerdoelen (komma-gescheiden)</label><input id="d-objectives" /></div>
+      <div class="field"><label for="d-content">Inhoud</label><textarea id="d-content" rows="10" required></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="d-submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: inhoud bekijken -->
+<div class="modal-backdrop" id="bekijk-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>Documentinhoud</h3><button class="modal-close" data-close>&times;</button></div>
+    <div id="bekijk-body"></div>
+    <div class="modal-actions"><button type="button" class="btn btn-secondary" data-close>Sluiten</button></div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'vakdocent', 'surveillant'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const KIND_LABEL = { origineel: 'Origineel', ai_variant: 'AI-inhaaltoets', antwoordmodel: 'Antwoordmodel' };
+  const STATUS_TONE = { nieuw: 'neutral', wacht_op_goedkeuring: 'warn', goedgekeurd: 'good' };
+  const badge = (status) => `<span class="badge badge--${STATUS_TONE[status] || 'neutral'}">${escapeHtml(status)}</span>`;
+
+  const { data: tests } = await supabase.from('tests').select('test_id, title').order('created_at', { ascending: false });
+  $('#d-test').innerHTML = (tests || []).map((t) => `<option value="${t.test_id}">${escapeHtml(t.title)}</option>`).join('');
+
+  $('#btn-nieuw').addEventListener('click', () => openModal('#nieuw-modal'));
+
+  $('#nieuw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#d-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const testId = $('#d-test').value;
+      const { data: test } = await supabase.from('tests').select('school_id').eq('test_id', testId).maybeSingle();
+      const documentType = $('#d-type').value;
+      const kind = documentType === 'antwoordmodel' ? 'antwoordmodel' : 'origineel';
+      const objectives = $('#d-objectives').value.split(',').map((s) => s.trim()).filter(Boolean);
+      const content = [$('#d-content').value.trim(), objectives.length ? `Leerdoelen: ${objectives.join(', ')}` : null].filter(Boolean).join('\n\n');
+      const { error } = await supabase.from('test_documents').insert({
+        school_id: test.school_id, test_id: testId, kind, content, status: 'goedgekeurd', ai_human_review_required: false,
+      });
+      if (error) throw error;
+      toast('Document toegevoegd.', 'good');
+      closeModal('#nieuw-modal');
+      e.target.reset();
+      await laadDocumenten();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await laadDocumenten();
+
+  async function laadDocumenten() {
+    const { data: docs, error } = await supabase
+      .from('test_documents')
+      .select('document_id, kind, status, content, tests(title)')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) { $('#docs-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#docs-body').innerHTML = (docs || []).length
+      ? docs.map((d) => `<tr>
+          <td>${escapeHtml(d.tests?.title || '—')}</td>
+          <td>${escapeHtml(KIND_LABEL[d.kind] || d.kind)}</td>
+          <td>${badge(d.status)}</td>
+          <td><button class="btn btn-sm btn-secondary" data-bekijk="${d.document_id}">Bekijk</button></td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen documenten.</td></tr>`;
+
+    $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', async () => {
+      const { data: doc } = await supabase.from('test_documents').select('content').eq('document_id', btn.dataset.bekijk).maybeSingle();
+      $('#bekijk-body').innerHTML = `<div class="field"><textarea rows="14" readonly>${escapeHtml(doc?.content || '')}</textarea></div>`;
+      openModal('#bekijk-modal');
+    }));
+  }
+</script>
+</body>
+</html>

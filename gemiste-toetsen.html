@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gemiste toetsen & inhaal - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link active" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Gemiste toetsen & inhaal</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="staff-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Gemiste toetsen</h3><button class="btn btn-primary" id="btn-nieuw">+ Gemiste toets registreren</button></div>
+          <p class="hint">Registreer een gemiste toets, laat daarna een AI-concept inhaaltoets genereren en keur die goed voordat hij gebruikt wordt.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Toets</th><th>Reden</th><th>Status inhaal</th><th>Geregistreerd</th><th></th></tr></thead>
+            <tbody id="rows-body"><tr><td colspan="6" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="student-view" hidden>
+        <div class="card">
+          <div class="card-row"><h3>Openstaande inhaaltoetsen</h3></div>
+          <p class="hint" id="student-hint"></p>
+          <div id="student-rows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: nieuwe gemiste toets -->
+<div class="modal-backdrop" id="nieuw-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Gemiste toets registreren</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="nieuw-form">
+      <div class="field"><label for="f-student">Leerling</label><select id="f-student" required></select></div>
+      <div class="field"><label for="f-test">Toets (optioneel)</label><select id="f-test"><option value="">— geen gekoppelde toets —</option></select></div>
+      <div class="field"><label for="f-reason">Reden</label><input id="f-reason" placeholder="Bijv. ziek, te laat, geen geldige reden…" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="f-submit">Registreren</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: AI-inhaaltoets genereren -->
+<div class="modal-backdrop" id="genereer-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>AI-inhaaltoets genereren</h3><button class="modal-close" data-close>&times;</button></div>
+    <p class="hint">De AI maakt een concept - dit moet je hierna altijd zelf beoordelen en goedkeuren voordat de toets ingezet wordt.</p>
+    <form id="genereer-form">
+      <input type="hidden" id="g-missed-id" />
+      <div class="form-row">
+        <div class="field"><label for="g-subject">Vak</label><input id="g-subject" /></div>
+        <div class="field"><label for="g-level">Niveau</label><input id="g-level" placeholder="Bijv. HAVO 3" /></div>
+      </div>
+      <div class="field"><label for="g-objectives">Leerdoelen</label><input id="g-objectives" placeholder="Bijv. ontbinden in factoren, abc-formule" /></div>
+      <div class="field"><label for="g-original">Originele toetstekst (optioneel, verbetert het resultaat)</label><textarea id="g-original" rows="6"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="g-submit">Genereren</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: beoordelen -->
+<div class="modal-backdrop" id="beoordeel-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>AI-concept beoordelen</h3><button class="modal-close" data-close>&times;</button></div>
+    <div id="beoordeel-body"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+      <button type="button" class="btn btn-primary" id="btn-goedkeuren">Goedkeuren</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDateTime, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+  const isStaff = !['ouder', 'leerling'].includes(profile.role);
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const STATUS_LABEL = {
+    nieuw: 'Nog geen inhaaltoets', gepland: 'Gepland', wacht_op_toets: 'Wacht op toetstekst',
+    wacht_op_goedkeuring: 'Wacht op goedkeuring', goedgekeurd: 'Goedgekeurd', klaargezet_voor_afname: 'Klaargezet voor afname',
+    afgenomen: 'Afgenomen', afgerond: 'Afgerond', verlopen: 'Verlopen', no_show: 'Niet verschenen', geescaleerd: 'Geëscaleerd', geannuleerd: 'Geannuleerd',
+  };
+  const STATUS_TONE = { nieuw: 'neutral', wacht_op_goedkeuring: 'warn', goedgekeurd: 'good', afgerond: 'good', no_show: 'critical', geescaleerd: 'critical' };
+  function statusBadge(status) {
+    const tone = STATUS_TONE[status] || 'neutral';
+    return `<span class="badge badge--${tone}">${escapeHtml(STATUS_LABEL[status] || status)}</span>`;
+  }
+
+  if (isStaff) {
+    $('#staff-view').hidden = false;
+    await initStaffView();
+  } else {
+    $('#student-view').hidden = false;
+    await initStudentView();
+  }
+
+  async function initStaffView() {
+    const [{ data: students }, { data: tests }] = await Promise.all([
+      supabase.from('students').select('student_id, full_name').order('full_name'),
+      supabase.from('tests').select('test_id, title').order('title'),
+    ]);
+    $('#f-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+    $('#f-test').innerHTML += (tests || []).map((t) => `<option value="${t.test_id}">${escapeHtml(t.title)}</option>`).join('');
+
+    $('#btn-nieuw').addEventListener('click', () => openModal('#nieuw-modal'));
+
+    $('#nieuw-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#f-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        const studentId = $('#f-student').value;
+        let testId = $('#f-test').value || null;
+        const reason = $('#f-reason').value.trim() || null;
+        if (!testId) {
+          // Geen bestaande toets gekozen: maak een minimale ad-hoc toets aan
+          // zodat missed_tests.test_id altijd gezet is - de AI-documenten
+          // worden hierop gematcht, dus zonder test_id kan de docent het
+          // AI-concept later niet meer terugvinden om te beoordelen.
+          const { data: newTest, error: eT } = await supabase
+            .from('tests')
+            .insert({ school_id: profile.school_id, title: `Gemiste toets ${new Date().toLocaleDateString('nl-NL')}` })
+            .select('test_id')
+            .single();
+          if (eT) throw eT;
+          testId = newTest.test_id;
+        }
+        const { data: missed, error: e1 } = await supabase
+          .from('missed_tests')
+          .insert({ school_id: profile.school_id, student_id: studentId, test_id: testId, reason, status: 'nieuw' })
+          .select('missed_test_id')
+          .single();
+        if (e1) throw e1;
+        const { error: e2 } = await supabase
+          .from('makeup_tests')
+          .insert({ school_id: profile.school_id, missed_test_id: missed.missed_test_id, status: 'nieuw' });
+        if (e2) throw e2;
+        toast('Gemiste toets geregistreerd.', 'good');
+        closeModal('#nieuw-modal');
+        e.target.reset();
+        await laadRijen();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    $('#genereer-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#g-submit');
+      setLoading(btn, true, 'AI genereert… (kan even duren)');
+      try {
+        await invokeFunction('genereer-inhaaltoets', {
+          missedTestId: $('#g-missed-id').value,
+          subject: $('#g-subject').value.trim(),
+          level: $('#g-level').value.trim(),
+          learningObjectives: $('#g-objectives').value.trim(),
+          originalTestText: $('#g-original').value.trim(),
+        });
+        toast('AI-concept gegenereerd - klaar voor beoordeling.', 'good');
+        closeModal('#genereer-modal');
+        e.target.reset();
+        await laadRijen();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    await laadRijen();
+
+    async function laadRijen() {
+      const { data: rows, error } = await supabase
+        .from('missed_tests')
+        .select('missed_test_id, reason, status, created_at, test_id, students(full_name), tests(title), makeup_tests(makeup_test_id, status, document_id)')
+        .order('created_at', { ascending: false });
+      if (error) {
+        $('#rows-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`;
+        return;
+      }
+      if (!rows || !rows.length) {
+        $('#rows-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">Nog geen gemiste toetsen geregistreerd.</td></tr>`;
+        return;
+      }
+      $('#rows-body').innerHTML = rows.map((r) => {
+        const makeup = Array.isArray(r.makeup_tests) ? r.makeup_tests[0] : r.makeup_tests;
+        let actie = '';
+        if (makeup?.status === 'nieuw') {
+          actie = `<button class="btn btn-sm btn-secondary" data-genereer="${r.missed_test_id}">AI-inhaaltoets genereren</button>`;
+        } else if (makeup?.status === 'wacht_op_goedkeuring') {
+          actie = `<button class="btn btn-sm btn-primary" data-beoordeel="${r.missed_test_id}" data-makeup="${makeup.makeup_test_id}">Beoordelen</button>`;
+        }
+        return `<tr>
+          <td>${escapeHtml(r.students?.full_name || '—')}</td>
+          <td>${escapeHtml(r.tests?.title || '—')}</td>
+          <td>${escapeHtml(r.reason || '—')}</td>
+          <td>${statusBadge(makeup?.status || r.status)}</td>
+          <td>${formatDateTime(r.created_at)}</td>
+          <td>${actie}</td>
+        </tr>`;
+      }).join('');
+
+      $$('[data-genereer]').forEach((btn) => btn.addEventListener('click', () => {
+        $('#g-missed-id').value = btn.dataset.genereer;
+        openModal('#genereer-modal');
+      }));
+      $$('[data-beoordeel]').forEach((btn) => btn.addEventListener('click', () => beoordeelOpenen(btn.dataset.makeup, btn.dataset.beoordeel)));
+    }
+
+    async function beoordeelOpenen(makeupTestId, missedTestId) {
+      const { data: docs, error } = await supabase
+        .from('test_documents')
+        .select('document_id, kind, content, ai_confidence, ai_reason')
+        .eq('missed_test_id', missedTestId)
+        .eq('status', 'wacht_op_goedkeuring')
+        .order('created_at', { ascending: false })
+        .limit(2);
+      if (error) { toast(friendlyError(error), 'critical'); return; }
+      const variant = docs?.find((d) => d.kind === 'ai_variant');
+      const model = docs?.find((d) => d.kind === 'antwoordmodel');
+      $('#beoordeel-body').innerHTML = `
+        <p class="hint">AI-confidence: <strong>${variant?.ai_confidence != null ? Math.round(variant.ai_confidence * 100) + '%' : 'onbekend'}</strong></p>
+        <p class="hint">${escapeHtml(variant?.ai_reason || '')}</p>
+        <div class="field"><label>Inhaaltoets (concept)</label><textarea rows="8" readonly>${escapeHtml(variant?.content || '')}</textarea></div>
+        <div class="field"><label>Antwoordmodel (concept)</label><textarea rows="6" readonly>${escapeHtml(model?.content || '')}</textarea></div>
+      `;
+      $('#btn-goedkeuren').onclick = async () => {
+        const btn = $('#btn-goedkeuren');
+        setLoading(btn, true, 'Bezig…');
+        try {
+          const ids = (docs || []).map((d) => d.document_id);
+          const { error: e1 } = await supabase
+            .from('test_documents')
+            .update({ status: 'goedgekeurd', approved_by: profile.id, approved_at: new Date().toISOString() })
+            .in('document_id', ids);
+          if (e1) throw e1;
+          const { error: e2 } = await supabase.from('makeup_tests').update({ status: 'goedgekeurd' }).eq('makeup_test_id', makeupTestId);
+          if (e2) throw e2;
+          toast('Inhaaltoets goedgekeurd.', 'good');
+          closeModal('#beoordeel-modal');
+          await laadRijen();
+        } catch (err) {
+          toast(friendlyError(err), 'critical');
+        } finally {
+          setLoading(btn, false);
+        }
+      };
+      openModal('#beoordeel-modal');
+    }
+  }
+
+  async function initStudentView() {
+    $('#student-hint').textContent = profile.role === 'ouder'
+      ? 'Openstaande en goedgekeurde inhaaltoetsen van je kind(eren).'
+      : 'Jouw openstaande en goedgekeurde inhaaltoetsen.';
+
+    const { data: missed, error } = await supabase
+      .from('missed_tests')
+      .select('missed_test_id, reason, status, students(full_name), makeup_tests(status, document_id)')
+      .order('created_at', { ascending: false });
+    if (error) {
+      $('#student-rows').innerHTML = `<p style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</p>`;
+      return;
+    }
+    if (!missed || !missed.length) {
+      $('#student-rows').innerHTML = `<p style="color:var(--text-muted);">Geen gemiste toetsen gevonden.</p>`;
+      return;
+    }
+
+    const rows = [];
+    for (const m of missed) {
+      const makeup = Array.isArray(m.makeup_tests) ? m.makeup_tests[0] : m.makeup_tests;
+      let toetstekst = '';
+      if (makeup?.document_id) {
+        const { data: doc } = await supabase.from('test_documents').select('content').eq('document_id', makeup.document_id).maybeSingle();
+        toetstekst = doc?.content || '';
+      }
+      rows.push(`<div class="card" style="margin-bottom:12px;">
+        <div class="card-row"><h4>${escapeHtml(m.students?.full_name || '')}</h4>${statusBadge(makeup?.status || m.status)}</div>
+        <p class="hint">Reden gemist: ${escapeHtml(m.reason || 'onbekend')}</p>
+        ${toetstekst ? `<div class="field"><label>Inhaaltoets</label><textarea rows="8" readonly>${escapeHtml(toetstekst)}</textarea></div>` : `<p class="hint">Nog geen goedgekeurde inhaaltoets beschikbaar.</p>`}
+      </div>`);
+    }
+    $('#student-rows').innerHTML = rows.join('');
+  }
+</script>
+</body>
+</html>

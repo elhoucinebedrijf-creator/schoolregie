@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OPP & zorgoverleg - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link active" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>OPP & zorgoverleg</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>OPP-trajecten</h3><button class="btn btn-primary" id="btn-nieuw-opp">+ OPP-traject starten</button></div>
+        <p class="hint">De AI maakt uitsluitend een concept-samenvatting - de zorgcoördinator neemt altijd het besluit.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Leerling</th><th>Status</th><th>Evaluatie voor</th><th>AI-samenvatting</th><th></th></tr></thead>
+          <tbody id="opp-body"><tr><td colspan="5" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-row"><h3>Zorgoverleg (MDO) - voorbereide agenda's</h3></div>
+        <p class="hint">Wekelijks automatisch voorbereid op basis van open hoog/kritiek-signalen en lopende OPP-trajecten.</p>
+        <div id="mdo-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: OPP starten -->
+<div class="modal-backdrop" id="nieuw-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>OPP-traject starten</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="nieuw-form">
+      <div class="field"><label for="o-student">Leerling</label><select id="o-student" required></select></div>
+      <div class="field"><label for="o-reason">Reden</label><textarea id="o-reason" rows="3" required></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="o-submit">Starten</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- modal: samenvatting bekijken -->
+<div class="modal-backdrop" id="samenvatting-modal">
+  <div class="modal modal--wide">
+    <div class="modal-header"><h3>AI-concept-samenvatting</h3><button class="modal-close" data-close>&times;</button></div>
+    <div id="samenvatting-body"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDate, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'zorgcoordinator', 'mentor', 'teamleider'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const STATUS_LABEL = { nieuw: 'Nieuw', in_behandeling: 'In behandeling', goedgekeurd: 'Goedgekeurd', afgerond: 'Afgerond', geannuleerd: 'Geannuleerd' };
+  const STATUS_TONE = { nieuw: 'warn', in_behandeling: 'neutral', goedgekeurd: 'good', afgerond: 'good', geannuleerd: 'neutral' };
+  const badge = (status) => `<span class="badge badge--${STATUS_TONE[status] || 'neutral'}">${escapeHtml(STATUS_LABEL[status] || status)}</span>`;
+  const VOLGENDE_STATUS = { nieuw: 'in_behandeling', in_behandeling: 'goedgekeurd', goedgekeurd: 'afgerond' };
+
+  const { data: students } = await supabase.from('students').select('student_id, full_name').order('full_name');
+  $('#o-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+
+  $('#btn-nieuw-opp').addEventListener('click', () => openModal('#nieuw-modal'));
+
+  $('#nieuw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#o-submit');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const studentId = $('#o-student').value;
+      const reason = $('#o-reason').value.trim();
+      const reviewDueDate = new Date();
+      reviewDueDate.setDate(reviewDueDate.getDate() + 42);
+      const { data: opp, error: e1 } = await supabase.from('opp_plans').insert({
+        school_id: profile.school_id, student_id: studentId, status: 'nieuw', ai_human_review_required: true,
+        started_by: profile.id, review_due_date: reviewDueDate.toISOString().slice(0, 10),
+      }).select('opp_id').single();
+      if (e1) throw e1;
+      await supabase.from('dossier_entries').insert({
+        school_id: profile.school_id, student_id: studentId, entry_type: 'opp_start', related_type: 'opp_plan', related_id: opp.opp_id,
+        summary: reason, author_profile_id: profile.id,
+      });
+      toast('OPP-traject gestart.', 'good');
+      closeModal('#nieuw-modal');
+      e.target.reset();
+      await laadOpp();
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  await Promise.all([laadOpp(), laadMdo()]);
+
+  async function laadOpp() {
+    const { data: rows, error } = await supabase
+      .from('opp_plans')
+      .select('opp_id, status, review_due_date, ai_summary, ai_confidence, students(full_name)')
+      .order('created_at', { ascending: false });
+    if (error) { $('#opp-body').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+    $('#opp-body').innerHTML = (rows || []).length
+      ? rows.map((r) => `<tr>
+          <td>${escapeHtml(r.students?.full_name || '—')}</td>
+          <td>${badge(r.status)}</td>
+          <td>${formatDate(r.review_due_date)}</td>
+          <td>${r.ai_summary ? `<button class="btn btn-sm btn-secondary" data-bekijk="${r.opp_id}">Bekijk (${Math.round((r.ai_confidence || 0) * 100)}%)</button>` : `<button class="btn btn-sm btn-secondary" data-genereer="${r.opp_id}">Genereer samenvatting</button>`}</td>
+          <td>${r.status !== 'afgerond' && r.status !== 'geannuleerd' && VOLGENDE_STATUS[r.status] ? `<button class="btn btn-sm btn-primary" data-volgende="${r.opp_id}" data-status="${VOLGENDE_STATUS[r.status]}">${escapeHtml(STATUS_LABEL[VOLGENDE_STATUS[r.status]])}</button>` : ''}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--text-muted);">Nog geen OPP-trajecten.</td></tr>`;
+
+    $$('[data-genereer]').forEach((btn) => btn.addEventListener('click', async () => {
+      setLoading(btn, true, 'AI beoordeelt…');
+      try {
+        await invokeFunction('genereer-opp-samenvatting', { oppId: btn.dataset.genereer });
+        toast('AI-samenvatting gegenereerd.', 'good');
+        await laadOpp();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+        setLoading(btn, false);
+      }
+    }));
+    $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', async () => {
+      const { data: opp } = await supabase.from('opp_plans').select('ai_summary, ai_confidence').eq('opp_id', btn.dataset.bekijk).maybeSingle();
+      $('#samenvatting-body').innerHTML = `
+        <p class="hint">Confidence: ${opp?.ai_confidence != null ? Math.round(opp.ai_confidence * 100) + '%' : 'onbekend'}</p>
+        <div class="field"><textarea rows="14" readonly>${escapeHtml(opp?.ai_summary || '')}</textarea></div>
+      `;
+      openModal('#samenvatting-modal');
+    }));
+    $$('[data-volgende]').forEach((btn) => btn.addEventListener('click', async () => {
+      const { error } = await supabase.from('opp_plans').update({ status: btn.dataset.status }).eq('opp_id', btn.dataset.volgende);
+      if (error) { toast(friendlyError(error), 'critical'); return; }
+      await laadOpp();
+    }));
+  }
+
+  async function laadMdo() {
+    const { data: rows, error } = await supabase
+      .from('tasks')
+      .select('task_id, title, description, due_date, status')
+      .eq('related_type', 'mdo_agenda')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (error) { $('#mdo-list').innerHTML = `<p class="hint">${escapeHtml(friendlyError(error))}</p>`; return; }
+    $('#mdo-list').innerHTML = (rows || []).length
+      ? rows.map((r) => `<div class="card" style="margin-bottom:8px;">
+          <div class="card-row"><strong>${escapeHtml(r.title)}</strong>${badge(r.status === 'afgerond' ? 'afgerond' : 'nieuw')}</div>
+          <p class="hint">Overleg gepland voor: ${formatDate(r.due_date)}</p>
+          <div class="field"><textarea rows="8" readonly>${escapeHtml(r.description || '')}</textarea></div>
+          ${r.status !== 'afgerond' ? `<button class="btn btn-sm btn-secondary" data-mdo-afgerond="${r.task_id}">Markeer als behandeld</button>` : ''}
+        </div>`).join('')
+      : `<p class="hint">Nog geen MDO-agenda's voorbereid.</p>`;
+
+    $$('[data-mdo-afgerond]').forEach((btn) => btn.addEventListener('click', async () => {
+      await supabase.from('tasks').update({ status: 'afgerond' }).eq('task_id', btn.dataset.mdoAfgerond);
+      await laadMdo();
+    }));
+  }
+</script>
+</body>
+</html>

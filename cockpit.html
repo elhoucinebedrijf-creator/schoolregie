@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Management cockpit - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link active" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Management cockpit</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="stat-grid" id="stats" style="margin-bottom:16px;"></div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>Verzuim deze week</h3></div>
+        <div id="verzuim-chart"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div class="card">
+          <div class="card-row"><h3>Maatwerk-status</h3></div>
+          <div id="maatwerk-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><h3>OPP-status</h3></div>
+          <div id="opp-chart"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-row"><h3>Open acties per eigenaar</h3></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Eigenaar</th><th>Open acties</th></tr></thead>
+          <tbody id="acties-body"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-row"><h3>Weekrapport</h3><button class="btn btn-primary" id="btn-rapport">Genereer weekrapport</button></div>
+        <div id="rapport-body" hidden>
+          <div class="field"><textarea rows="12" readonly id="rapport-tekst"></textarea></div>
+          <button class="btn btn-secondary" id="btn-versturen">Versturen naar directie/teamleiding</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
+  import { $, escapeHtml, renderTopbar, toast, setLoading, friendlyError, barChart } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  let laatsteMetrics = null;
+
+  await laadCockpit();
+
+  async function laadCockpit() {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+    const schoolId = profile.school_id;
+
+    const [missed, openMakeup, noShows, attendance, maatwerk, signals, opp, tasks] = await Promise.all([
+      supabase.from('missed_tests').select('missed_test_id', { count: 'exact', head: true }).eq('school_id', schoolId).gte('created_at', weekAgo.toISOString()),
+      supabase.from('makeup_tests').select('makeup_test_id', { count: 'exact', head: true }).eq('school_id', schoolId).eq('status', 'wacht_op_goedkeuring'),
+      supabase.from('makeup_tests').select('makeup_test_id', { count: 'exact', head: true }).eq('school_id', schoolId).eq('status', 'no_show').gte('created_at', weekAgo.toISOString()),
+      supabase.from('attendance_events').select('event_type').eq('school_id', schoolId).gte('event_date', weekAgo.toISOString().slice(0, 10)),
+      supabase.from('maatwerk_assignments').select('status').eq('school_id', schoolId),
+      supabase.from('signals').select('level, status').eq('school_id', schoolId).in('level', ['hoog', 'kritiek']),
+      supabase.from('opp_plans').select('status').eq('school_id', schoolId),
+      supabase.from('tasks').select('owner_profile_id, status, profiles(full_name)').eq('school_id', schoolId).in('status', ['nieuw', 'in_behandeling']),
+    ]);
+
+    const tellen = (rows) => { const m = {}; for (const r of rows || []) m[r.status] = (m[r.status] || 0) + 1; return m; };
+    const tellenPerType = (rows) => { const m = {}; for (const r of rows || []) m[r.event_type] = (m[r.event_type] || 0) + 1; return m; };
+    const openSignalen = (signals.data || []).filter((s) => !['afgerond', 'geannuleerd'].includes(s.status));
+    const eigenaarMap = {};
+    for (const t of tasks.data || []) {
+      const naam = t.profiles?.full_name || 'Niet toegewezen';
+      eigenaarMap[naam] = (eigenaarMap[naam] || 0) + 1;
+    }
+
+    laatsteMetrics = {
+      schoolId,
+      missedTestsDezeWeek: missed.count || 0,
+      openInhaaltoetsen: openMakeup.count || 0,
+      noShowsDezeWeek: noShows.count || 0,
+      verzuimDezeWeek: tellenPerType(attendance.data),
+      maatwerkStatus: tellen(maatwerk.data),
+      groteSignalenOpen: openSignalen.length,
+      oppStatus: tellen(opp.data),
+      openActiesPerEigenaar: eigenaarMap,
+    };
+
+    $('#stats').innerHTML = `
+      <div class="stat-card"><div class="value">${laatsteMetrics.missedTestsDezeWeek}</div><div class="label">Gemiste toetsen (week)</div></div>
+      <div class="stat-card"><div class="value">${laatsteMetrics.openInhaaltoetsen}</div><div class="label">Open inhaaltoetsen</div></div>
+      <div class="stat-card"><div class="value">${laatsteMetrics.noShowsDezeWeek}</div><div class="label">No-shows (week)</div></div>
+      <div class="stat-card"><div class="value">${laatsteMetrics.groteSignalenOpen}</div><div class="label">Open grote signalen</div></div>
+    `;
+
+    $('#verzuim-chart').innerHTML = barChart(Object.entries(laatsteMetrics.verzuimDezeWeek).map(([k, v]) => ({ label: k, value: v })));
+    $('#maatwerk-chart').innerHTML = barChart(Object.entries(laatsteMetrics.maatwerkStatus).map(([k, v]) => ({ label: k, value: v })));
+    $('#opp-chart').innerHTML = barChart(Object.entries(laatsteMetrics.oppStatus).map(([k, v]) => ({ label: k, value: v })));
+
+    const eigenaarRows = Object.entries(eigenaarMap);
+    $('#acties-body').innerHTML = eigenaarRows.length
+      ? eigenaarRows.map(([naam, aantal]) => `<tr><td>${escapeHtml(naam)}</td><td>${aantal}</td></tr>`).join('')
+      : `<tr><td colspan="2" style="color:var(--text-muted);">Geen openstaande acties.</td></tr>`;
+  }
+
+  $('#btn-rapport').addEventListener('click', async () => {
+    const btn = $('#btn-rapport');
+    setLoading(btn, true, 'AI schrijft rapport…');
+    try {
+      const result = await invokeFunction('genereer-managementrapport', laatsteMetrics);
+      $('#rapport-tekst').value = result.reportText || '';
+      $('#rapport-body').hidden = false;
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  $('#btn-versturen').addEventListener('click', async () => {
+    const btn = $('#btn-versturen');
+    setLoading(btn, true, 'Bezig…');
+    try {
+      const { data: ontvangers } = await supabase.from('profiles').select('id').eq('school_id', profile.school_id).in('role', ['directie', 'teamleider', 'kwaliteitsmedewerker']);
+      for (const o of ontvangers || []) {
+        await supabase.from('tasks').insert({
+          school_id: profile.school_id, title: 'Wekelijks managementrapport', description: $('#rapport-tekst').value,
+          owner_profile_id: o.id, related_type: 'management_report', status: 'nieuw',
+        });
+      }
+      toast(`Verstuurd naar ${ontvangers?.length || 0} ontvanger(s).`, 'good');
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+</script>
+</body>
+</html>

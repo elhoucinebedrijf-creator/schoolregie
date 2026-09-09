@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Verzuim - SchoolRegie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/styles.css" />
+<script src="/assets/config.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <div><div class="name">SchoolRegie</div><div class="sub" id="sidebar-rol"></div></div>
+    </div>
+    <a class="nav-link" href="/dashboard.html">Overzicht</a>
+    <a class="nav-link" href="/gemiste-toetsen.html">Gemiste toetsen & inhaal</a>
+    <a class="nav-link active" href="/verzuim.html">Verzuim</a>
+    <a class="nav-link" href="/maatwerk.html">Maatwerk</a>
+    <a class="nav-link" href="/signalen.html">Signalen & oudergesprekken</a>
+    <a class="nav-link" href="/opp-zorg.html">OPP & zorgoverleg</a>
+    <a class="nav-link" href="/toetsbank.html">Toetsbank</a>
+    <a class="nav-link" href="/surveillance.html">Surveillance</a>
+    <a class="nav-link" href="/rooster.html">Rooster & capaciteit</a>
+    <a class="nav-link" href="/cockpit.html">Management cockpit</a>
+    <a class="nav-link" href="/import.html">Import & koppelingen</a>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost sidebar-signout" id="signout-btn">Uitloggen</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-ghost menu-toggle" id="menu-toggle">☰</button>
+        <div class="topbar-title"><h1>Verzuim</h1></div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-user"><div class="name" id="topbar-name"></div><div class="role" id="topbar-role"></div></div>
+        <div class="avatar" id="topbar-avatar"></div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="staff-view" hidden>
+        <div class="card" id="drempel-card" style="margin-bottom:16px;" hidden>
+          <div class="card-row"><h3>Drempels voor automatische opvolging</h3></div>
+          <form id="drempel-form" class="form-row">
+            <div class="field"><label for="d-late">Te laat</label><input type="number" id="d-late" min="1" /></div>
+            <div class="field"><label for="d-unauth">Ongeoorloofd afwezig</label><input type="number" id="d-unauth" min="1" /></div>
+            <div class="field"><label for="d-truancy">Spijbelen</label><input type="number" id="d-truancy" min="1" /></div>
+            <div class="field" style="align-self:flex-end;"><button type="submit" class="btn btn-secondary" id="d-submit">Opslaan</button></div>
+          </form>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Verzuimmeldingen</h3><button class="btn btn-primary" id="btn-nieuw">+ Verzuim registreren</button></div>
+          <p class="hint">Bij het bereiken van de schooldrempel wordt automatisch een interventie (of bij spijbelen: een signaal) aangemaakt.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Type</th><th>Datum</th><th>Toelichting</th></tr></thead>
+            <tbody id="events-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-row"><h3>Openstaande interventies</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Leerling</th><th>Soort</th><th>Eigenaar</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
+            <tbody id="interventions-body"><tr><td colspan="6" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="student-view" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-row"><h3>Verzuimmeldingen</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Type</th><th>Datum</th><th>Toelichting</th></tr></thead>
+            <tbody id="own-events-body"></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><h3>Interventies</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Soort</th><th>Deadline</th><th>Status</th></tr></thead>
+            <tbody id="own-interventions-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal: verzuim registreren -->
+<div class="modal-backdrop" id="nieuw-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Verzuim registreren</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="nieuw-form">
+      <div class="field"><label for="f-student">Leerling</label><select id="f-student" required></select></div>
+      <div class="field"><label for="f-type">Type</label>
+        <select id="f-type" required>
+          <option value="te_laat">Te laat</option>
+          <option value="ongeoorloofd_afwezig">Ongeoorloofd afwezig</option>
+          <option value="spijbelen">Spijbelen</option>
+          <option value="geoorloofd_afwezig">Geoorloofd afwezig</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="field"><label for="f-date">Datum</label><input type="date" id="f-date" required /></div>
+        <div class="field"><label for="f-period">Lesuur (optioneel)</label><input id="f-period" /></div>
+      </div>
+      <div class="field"><label for="f-explanation">Toelichting</label><input id="f-explanation" /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Annuleren</button>
+        <button type="submit" class="btn btn-primary" id="f-submit">Registreren</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+  import { requireUser, signOut, ROLE_LABEL } from '/assets/supabase-client.js';
+  import { $, $$, escapeHtml, formatDate, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+
+  const MODULE_ROLLEN = ['administrator', 'directie', 'teamleider', 'mentor', 'verzuimcoordinator', 'ouder', 'leerling'];
+  const ctx = await requireUser(MODULE_ROLLEN);
+  if (!ctx) throw new Error('niet ingelogd');
+  const { profile, supabase } = ctx;
+  const isStaff = !['ouder', 'leerling'].includes(profile.role);
+
+  renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
+  $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+  $$('[data-close]').forEach((el) => el.addEventListener('click', () => el.closest('.modal-backdrop').classList.remove('open')));
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+
+  const TYPE_LABEL = { te_laat: 'Te laat', ongeoorloofd_afwezig: 'Ongeoorloofd afwezig', spijbelen: 'Spijbelen', geoorloofd_afwezig: 'Geoorloofd afwezig' };
+  const STATUS_LABEL = { nieuw: 'Nieuw', in_behandeling: 'In behandeling', afgerond: 'Afgerond', geannuleerd: 'Geannuleerd' };
+  const STATUS_TONE = { nieuw: 'warn', in_behandeling: 'neutral', afgerond: 'good', geannuleerd: 'neutral' };
+  function statusBadge(status) {
+    return `<span class="badge badge--${STATUS_TONE[status] || 'neutral'}">${escapeHtml(STATUS_LABEL[status] || status)}</span>`;
+  }
+
+  if (isStaff) {
+    $('#staff-view').hidden = false;
+    await initStaffView();
+  } else {
+    $('#student-view').hidden = false;
+    await initStudentView();
+  }
+
+  async function initStaffView() {
+    const { data: students } = await supabase.from('students').select('student_id, full_name, mentor_profile_id').order('full_name');
+    $('#f-student').innerHTML = (students || []).map((s) => `<option value="${s.student_id}">${escapeHtml(s.full_name)}</option>`).join('');
+    $('#f-date').value = new Date().toISOString().slice(0, 10);
+
+    const { data: settings } = await supabase.from('school_settings').select('*').maybeSingle();
+    if (['administrator', 'directie'].includes(profile.role) && settings) {
+      $('#drempel-card').hidden = false;
+      $('#d-late').value = settings.attendance_late_threshold;
+      $('#d-unauth').value = settings.attendance_unauthorized_threshold;
+      $('#d-truancy').value = settings.attendance_truancy_threshold;
+      $('#drempel-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = $('#d-submit');
+        setLoading(btn, true, 'Bezig…');
+        try {
+          const { error } = await supabase.from('school_settings').update({
+            attendance_late_threshold: Number($('#d-late').value),
+            attendance_unauthorized_threshold: Number($('#d-unauth').value),
+            attendance_truancy_threshold: Number($('#d-truancy').value),
+            updated_at: new Date().toISOString(),
+          }).eq('school_id', profile.school_id);
+          if (error) throw error;
+          toast('Drempels opgeslagen.', 'good');
+        } catch (err) {
+          toast(friendlyError(err), 'critical');
+        } finally {
+          setLoading(btn, false);
+        }
+      });
+    }
+
+    $('#btn-nieuw').addEventListener('click', () => openModal('#nieuw-modal'));
+
+    $('#nieuw-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#f-submit');
+      setLoading(btn, true, 'Bezig…');
+      try {
+        await registreerVerzuim({
+          studentId: $('#f-student').value,
+          eventType: $('#f-type').value,
+          eventDate: $('#f-date').value,
+          lessonPeriod: $('#f-period').value.trim() || null,
+          explanation: $('#f-explanation').value.trim() || null,
+        }, students);
+        toast('Verzuim geregistreerd.', 'good');
+        closeModal('#nieuw-modal');
+        e.target.reset();
+        $('#f-date').value = new Date().toISOString().slice(0, 10);
+        await Promise.all([laadEvents(), laadInterventies()]);
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    await Promise.all([laadEvents(), laadInterventies()]);
+
+    async function laadEvents() {
+      const { data: events, error } = await supabase
+        .from('attendance_events')
+        .select('event_id, event_type, event_date, note, students(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) { $('#events-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      $('#events-body').innerHTML = (events || []).length
+        ? events.map((ev) => `<tr><td>${escapeHtml(ev.students?.full_name || '—')}</td><td>${escapeHtml(TYPE_LABEL[ev.event_type] || ev.event_type)}</td><td>${formatDate(ev.event_date)}</td><td>${escapeHtml(ev.note || '—')}</td></tr>`).join('')
+        : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen verzuim geregistreerd.</td></tr>`;
+    }
+
+    async function laadInterventies() {
+      const { data: rows, error } = await supabase
+        .from('interventions')
+        .select('intervention_id, kind, status, due_date, notes, students(full_name), profiles(full_name)')
+        .order('created_at', { ascending: false });
+      if (error) { $('#interventions-body').innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
+      const open = (rows || []).filter((r) => !['afgerond', 'geannuleerd'].includes(r.status));
+      $('#interventions-body').innerHTML = open.length
+        ? open.map((r) => `<tr>
+            <td>${escapeHtml(r.students?.full_name || '—')}</td>
+            <td>${escapeHtml(r.kind)}</td>
+            <td>${escapeHtml(r.profiles?.full_name || '—')}</td>
+            <td>${formatDate(r.due_date)}</td>
+            <td>${statusBadge(r.status)}</td>
+            <td>
+              ${r.status === 'nieuw' ? `<button class="btn btn-sm btn-secondary" data-inbehandeling="${r.intervention_id}">In behandeling</button>` : ''}
+              <button class="btn btn-sm btn-primary" data-afronden="${r.intervention_id}">Afronden</button>
+            </td>
+          </tr>`).join('')
+        : `<tr><td colspan="6" style="color:var(--text-muted);">Geen openstaande interventies.</td></tr>`;
+
+      $$('[data-inbehandeling]').forEach((btn) => btn.addEventListener('click', async () => {
+        const { error } = await supabase.from('interventions').update({ status: 'in_behandeling' }).eq('intervention_id', btn.dataset.inbehandeling);
+        if (error) { toast(friendlyError(error), 'critical'); return; }
+        await laadInterventies();
+      }));
+      $$('[data-afronden]').forEach((btn) => btn.addEventListener('click', async () => {
+        const { error } = await supabase.from('interventions').update({ status: 'afgerond' }).eq('intervention_id', btn.dataset.afronden);
+        if (error) { toast(friendlyError(error), 'critical'); return; }
+        toast('Interventie afgerond.', 'good');
+        await laadInterventies();
+      }));
+    }
+  }
+
+  // Registreert een verzuimmelding en past dezelfde drempellogica toe als
+  // de n8n-route (api/index.ts -> handleAttendanceSignals) - staff heeft
+  // via RLS al rechtstreeks schrijfrechten op deze tabellen, dus geen
+  // aparte edge function nodig (zelfde patroon als "gemiste toets
+  // registreren" in Fase 1).
+  async function registreerVerzuim({ studentId, eventType, eventDate, lessonPeriod, explanation }, students) {
+    const student = students.find((s) => s.student_id === studentId);
+    const note = [lessonPeriod ? `Lesuur: ${lessonPeriod}` : null, explanation].filter(Boolean).join(' - ') || null;
+    const { error: e1 } = await supabase.from('attendance_events').insert({
+      school_id: profile.school_id, student_id: studentId, event_type: eventType, event_date: eventDate, note,
+    });
+    if (e1) throw e1;
+
+    if (eventType === 'geoorloofd_afwezig') return;
+
+    const { data: settings } = await supabase.from('school_settings').select('*').eq('school_id', profile.school_id).maybeSingle();
+    const thresholds = {
+      te_laat: settings?.attendance_late_threshold ?? 3,
+      ongeoorloofd_afwezig: settings?.attendance_unauthorized_threshold ?? 3,
+      spijbelen: settings?.attendance_truancy_threshold ?? 1,
+    };
+    const threshold = thresholds[eventType];
+
+    const sinds = new Date();
+    sinds.setDate(sinds.getDate() - 60);
+    const { data: recent } = await supabase
+      .from('attendance_events')
+      .select('event_id')
+      .eq('student_id', studentId)
+      .eq('event_type', eventType)
+      .gte('event_date', sinds.toISOString().slice(0, 10));
+    const aantal = recent?.length || 0;
+    if (aantal < threshold) return;
+
+    if (eventType === 'spijbelen') {
+      await supabase.from('signals').insert({
+        school_id: profile.school_id, student_id: studentId, level: 'hoog', trigger_type: 'verzuim_spijbelen',
+        detail: `${aantal}x spijbelen binnen 60 dagen (drempel: ${threshold}).`, status: 'nieuw',
+      });
+    } else {
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 3);
+      await supabase.from('interventions').insert({
+        school_id: profile.school_id, student_id: studentId, kind: 'verzuim_opvolging',
+        owner_profile_id: student?.mentor_profile_id || null, due_date: dueDate.toISOString().slice(0, 10),
+        status: 'nieuw', notes: `${aantal}x ${eventType} binnen 60 dagen (drempel: ${threshold}).`,
+      });
+    }
+    if (student?.mentor_profile_id) {
+      await supabase.from('communications').insert({
+        school_id: profile.school_id, student_id: studentId, channel: 'app', template_key: 'attendance_threshold_reached',
+        subject: `Verzuimdrempel bereikt: ${student.full_name}`,
+        body: `${student.full_name} heeft de drempel voor "${eventType}" bereikt (${aantal}x binnen 60 dagen, drempel: ${threshold}).`, status: 'nieuw',
+      });
+    }
+  }
+
+  async function initStudentView() {
+    const [{ data: events }, { data: interventions }] = await Promise.all([
+      supabase.from('attendance_events').select('event_type, event_date, note').order('event_date', { ascending: false }),
+      supabase.from('interventions').select('kind, due_date, status').order('created_at', { ascending: false }),
+    ]);
+    $('#own-events-body').innerHTML = (events || []).length
+      ? events.map((ev) => `<tr><td>${escapeHtml(TYPE_LABEL[ev.event_type] || ev.event_type)}</td><td>${formatDate(ev.event_date)}</td><td>${escapeHtml(ev.note || '—')}</td></tr>`).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">Geen verzuim geregistreerd.</td></tr>`;
+    $('#own-interventions-body').innerHTML = (interventions || []).length
+      ? interventions.map((r) => `<tr><td>${escapeHtml(r.kind)}</td><td>${formatDate(r.due_date)}</td><td>${statusBadge(r.status)}</td></tr>`).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">Geen interventies.</td></tr>`;
+  }
+</script>
+</body>
+</html>

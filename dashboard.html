@@ -71,27 +71,33 @@
   // Modules per rol, met bouwstatus - matcht de fase-indeling uit het
   // bouwplan (Fase 1: gemiste toetsen; Fase 2: verzuim/maatwerk; enz.).
   const ALLE_MODULES = {
-    'Gemiste toetsen & inhaal': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'], status: 'gepland' },
-    'AI-inhaaltoets & goedkeuring': { rollen: ['administrator', 'vakdocent'], status: 'gepland' },
-    'Verzuim': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'verzuimcoordinator', 'ouder', 'leerling'], status: 'gepland' },
-    'Maatwerk': { rollen: ['administrator', 'mentor', 'vakdocent', 'teamleider', 'leerling', 'ouder'], status: 'gepland' },
-    'Signalen & escalatie': { rollen: ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator'], status: 'gepland' },
-    'Oudergesprekken': { rollen: ['administrator', 'mentor', 'ouder'], status: 'gepland' },
-    'OPP & zorg': { rollen: ['administrator', 'zorgcoordinator', 'mentor'], status: 'gepland' },
-    'Zorgoverleg / MDO': { rollen: ['administrator', 'zorgcoordinator', 'teamleider'], status: 'gepland' },
-    'Toetsbank': { rollen: ['administrator', 'vakdocent', 'surveillant'], status: 'gepland' },
-    'Surveillance': { rollen: ['administrator', 'surveillant'], status: 'gepland' },
-    'Rooster & capaciteit': { rollen: ['administrator', 'teamleider'], status: 'gepland' },
-    'Management cockpit': { rollen: ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'], status: 'gepland' },
-    'Import & koppelingen': { rollen: ['administrator'], status: 'gepland' },
+    'Gemiste toetsen & inhaal': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'vakdocent', 'surveillant', 'leerling', 'ouder'], status: 'beschikbaar', href: '/gemiste-toetsen.html' },
+    'AI-inhaaltoets & goedkeuring': { rollen: ['administrator', 'vakdocent'], status: 'beschikbaar', href: '/gemiste-toetsen.html' },
+    'Verzuim': { rollen: ['administrator', 'directie', 'teamleider', 'mentor', 'verzuimcoordinator', 'ouder', 'leerling'], status: 'beschikbaar', href: '/verzuim.html' },
+    'Maatwerk': { rollen: ['administrator', 'mentor', 'vakdocent', 'teamleider', 'leerling', 'ouder'], status: 'beschikbaar', href: '/maatwerk.html' },
+    'Signalen & escalatie': { rollen: ['administrator', 'mentor', 'teamleider', 'directie', 'zorgcoordinator'], status: 'beschikbaar', href: '/signalen.html' },
+    'Oudergesprekken': { rollen: ['administrator', 'mentor', 'ouder'], status: 'beschikbaar', href: '/signalen.html' },
+    'OPP & zorg': { rollen: ['administrator', 'zorgcoordinator', 'mentor'], status: 'beschikbaar', href: '/opp-zorg.html' },
+    'Zorgoverleg / MDO': { rollen: ['administrator', 'zorgcoordinator', 'teamleider'], status: 'beschikbaar', href: '/opp-zorg.html' },
+    'Toetsbank': { rollen: ['administrator', 'vakdocent', 'surveillant'], status: 'beschikbaar', href: '/toetsbank.html' },
+    'Surveillance': { rollen: ['administrator', 'surveillant'], status: 'beschikbaar', href: '/surveillance.html' },
+    'Rooster & capaciteit': { rollen: ['administrator', 'teamleider'], status: 'beschikbaar', href: '/rooster.html' },
+    'Management cockpit': { rollen: ['administrator', 'directie', 'teamleider', 'kwaliteitsmedewerker'], status: 'beschikbaar', href: '/cockpit.html' },
+    'Import & koppelingen': { rollen: ['administrator'], status: 'beschikbaar', href: '/import.html' },
   };
 
   const eigenModules = Object.entries(ALLE_MODULES).filter(([, m]) => m.rollen.includes(profile.role));
   $('#sidebar-modules').innerHTML = eigenModules
-    .map(([naam]) => `<a class="nav-link" style="opacity:0.55;cursor:default;" title="Nog niet gebouwd">${escapeHtml(naam)}</a>`)
+    .map(([naam, m]) => m.href
+      ? `<a class="nav-link" href="${m.href}">${escapeHtml(naam)}</a>`
+      : `<a class="nav-link" style="opacity:0.55;cursor:default;" title="Nog niet gebouwd">${escapeHtml(naam)}</a>`)
     .join('');
   $('#modules-body').innerHTML = eigenModules.length
-    ? eigenModules.map(([naam, m]) => `<tr><td>${escapeHtml(naam)}</td><td><span class="badge badge--neutral">${escapeHtml(m.status)}</span></td></tr>`).join('')
+    ? eigenModules.map(([naam, m]) => {
+        const tone = m.status === 'beschikbaar' ? 'good' : m.status.startsWith('backend') ? 'warn' : 'neutral';
+        const cell = m.href ? `<a href="${m.href}">${escapeHtml(naam)}</a>` : escapeHtml(naam);
+        return `<tr><td>${cell}</td><td><span class="badge badge--${tone}">${escapeHtml(m.status)}</span></td></tr>`;
+      }).join('')
     : `<tr><td colspan="2" style="color:var(--text-muted);">Geen modules gekoppeld aan deze rol.</td></tr>`;
 
   // Schoolinfo + eenvoudige teller als levend bewijs dat RLS/multi-tenancy werkt.

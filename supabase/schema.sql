@@ -195,6 +195,13 @@ create table makeup_tests (
 create index if not exists idx_makeup_tests_school on makeup_tests(school_id);
 create index if not exists idx_makeup_tests_missed on makeup_tests(missed_test_id);
 
+-- AI-varianten/antwoordmodellen worden per gemiste-toets-instantie
+-- gegenereerd (niet per toets) - anders zou het beoordelen van leerling A's
+-- concept per ongeluk leerling B's concept kunnen tonen als twee leerlingen
+-- dezelfde toets missen. test_id blijft voor het "origineel"-document.
+alter table test_documents add column if not exists missed_test_id uuid references missed_tests(missed_test_id) on delete cascade;
+create index if not exists idx_test_documents_missed_test on test_documents(missed_test_id);
+
 -- === Verzuim, interventies, maatwerk (module 3-4) ============================
 
 create table attendance_events (
@@ -447,6 +454,24 @@ as $$
   select coalesce((select role from profiles where id = auth.uid()) not in ('ouder','leerling'), false);
 $$;
 
+-- Leerling ziet eigen record (students.profile_id = auth.uid()); ouder ziet
+-- de leerling(en) waar hij/zij als guardian aan gekoppeld staat. Wordt per
+-- module (Fase 1+) gebruikt om ouder/leerling-select-policies op te bouwen,
+-- i.p.v. voor elke tabel een eigen dubbele exists-subquery te herhalen.
+create or replace function is_own_student(p_student_id uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from students s where s.student_id = p_student_id and s.profile_id = auth.uid()
+  ) or exists (
+    select 1 from students s
+    join student_guardians sg on sg.student_id = s.student_id
+    join guardians g on g.guardian_id = sg.guardian_id
+    where s.student_id = p_student_id and g.profile_id = auth.uid()
+  );
+$$;
+
 -- === RLS inschakelen ============================================================
 
 alter table schools enable row level security;
@@ -545,3 +570,49 @@ create policy opp_actions_staff on opp_actions for all
 create policy conversation_notes_staff on conversation_notes for all
   using (is_staff() and exists (select 1 from conversations c where c.conversation_id = conversation_notes.conversation_id and c.school_id = current_school_id()))
   with check (is_staff() and exists (select 1 from conversations c where c.conversation_id = conversation_notes.conversation_id and c.school_id = current_school_id()));
+
+-- === Fase 1: ouder/leerling-zicht op eigen (kind-)gegevens ===================
+-- Bewust read-only en smal: alleen wat leerling.html/dashboard-uitbreiding
+-- nodig heeft. test_documents alleen zichtbaar zodra status='goedgekeurd'
+-- (een leerling mag nooit een niet-goedgekeurde AI-conceptversie zien).
+
+create policy students_own_select on students for select
+  using (is_own_student(student_id));
+
+create policy missed_tests_own_select on missed_tests for select
+  using (is_own_student(student_id));
+
+create policy makeup_tests_own_select on makeup_tests for select
+  using (exists (select 1 from missed_tests mt where mt.missed_test_id = makeup_tests.missed_test_id and is_own_student(mt.student_id)));
+
+create policy test_documents_own_select on test_documents for select
+  using (exists (
+    select 1 from makeup_tests mkt
+    join missed_tests mt on mt.missed_test_id = mkt.missed_test_id
+    where mkt.document_id = test_documents.document_id and is_own_student(mt.student_id) and test_documents.status = 'goedgekeurd'
+  ));
+
+-- === Fase 2: ouder/leerling-zicht op eigen verzuim/maatwerk ===================
+-- signals blijft bewust buiten dit zicht (escalatie-detail is Fase 3-terrein).
+
+create policy attendance_events_own_select on attendance_events for select
+  using (is_own_student(student_id));
+
+create policy interventions_own_select on interventions for select
+  using (is_own_student(student_id));
+
+create policy maatwerk_assignments_own_select on maatwerk_assignments for select
+  using (is_own_student(student_id));
+
+-- === Fase 3: ouder/leerling-zicht op oudergesprekken + communicatie ===========
+-- signals en conversation_notes blijven bewust staff-only (escalatie-detail
+-- resp. interne mentor-aantekeningen). Ouder mag een voorgesteld gesprek
+-- NIET rechtstreeks via een update-policy bevestigen (RLS is rij-niveau,
+-- geen kolom-niveau - dan zou een ouder ook scheduled_at/status/kind kunnen
+-- wijzigen) - dat gaat via de edge function `bevestig-oudergesprek`.
+
+create policy conversations_own_select on conversations for select
+  using (is_own_student(student_id));
+
+create policy communications_own_select on communications for select
+  using (student_id is not null and is_own_student(student_id));
