@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gemiste toetsen & inhaal - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -120,6 +121,17 @@
       <button type="button" class="btn btn-ghost" id="btn-print-toets">Toets afdrukken/PDF</button>
       <button type="button" class="btn btn-ghost" id="btn-print-antwoordmodel">Antwoordmodel afdrukken/PDF</button>
       <button type="button" class="btn btn-primary" id="btn-goedkeuren">Goedkeuren (→ surveillant + printer)</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: statusgeschiedenis -->
+<div class="modal-backdrop" id="geschiedenis-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Statusgeschiedenis</h3><button class="modal-close" data-close>&times;</button></div>
+    <div id="geschiedenis-body"><p class="hint">Bezig met laden…</p></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-close>Sluiten</button>
     </div>
   </div>
 </div>
@@ -321,9 +333,11 @@
           <td>${escapeHtml(r.reason || '—')}</td>
           <td>${statusBadge(makeup?.status || r.status)}</td>
           <td>${formatDateTime(r.created_at)}</td>
-          <td>${actie}</td>
+          <td>${actie} <button class="btn btn-ghost btn-sm" data-geschiedenis="${r.missed_test_id}" data-geschiedenis-makeup="${makeup?.makeup_test_id || ''}">Geschiedenis</button></td>
         </tr>`;
       }).join('');
+
+      $$('[data-geschiedenis]').forEach((btn) => btn.addEventListener('click', () => toonGeschiedenis(btn.dataset.geschiedenis, btn.dataset.geschiedenisMakeup)));
 
       $$('[data-genereer]').forEach((btn) => btn.addEventListener('click', () => {
         $('#g-missed-id').value = btn.dataset.genereer;
@@ -340,6 +354,31 @@
           setLoading(btn, false);
         }
       }));
+    }
+
+    async function toonGeschiedenis(missedTestId, makeupTestId) {
+      openModal('#geschiedenis-modal');
+      $('#geschiedenis-body').innerHTML = '<p class="hint">Bezig met laden…</p>';
+      // Combineert de historie van de melding zelf én van de bijbehorende
+      // inhaalactie (makeup_tests) tot één tijdlijn - de echte "reis" van
+      // een gemiste toets loopt grotendeels via de status van de
+      // inhaalactie (nieuw -> wacht_op_goedkeuring -> goedgekeurd -> ...).
+      const queries = [
+        supabase.from('status_history').select('from_status, to_status, changed_at, profiles(full_name)').eq('entity_type', 'missed_tests').eq('entity_id', missedTestId),
+      ];
+      if (makeupTestId) {
+        queries.push(supabase.from('status_history').select('from_status, to_status, changed_at, profiles(full_name)').eq('entity_type', 'makeup_tests').eq('entity_id', makeupTestId));
+      }
+      const results = await Promise.all(queries);
+      const error = results.find((r) => r.error)?.error;
+      if (error) { $('#geschiedenis-body').innerHTML = `<p class="hint">${escapeHtml(friendlyError(error))}</p>`; return; }
+      const rows = results.flatMap((r) => r.data || []).sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+      if (!rows.length) { $('#geschiedenis-body').innerHTML = '<p class="hint">Nog geen geregistreerde statuswijzigingen.</p>'; return; }
+      $('#geschiedenis-body').innerHTML = `<ul style="list-style:none;margin:0;padding:0;">${rows.map((h) => `
+        <li style="padding:8px 0;border-bottom:1px solid var(--border);">
+          ${h.from_status ? `${statusBadge(h.from_status)} → ` : ''}${statusBadge(h.to_status)}
+          <div class="hint" style="margin-top:2px;">${formatDateTime(h.changed_at)}${h.profiles?.full_name ? ` · ${escapeHtml(h.profiles.full_name)}` : ''}</div>
+        </li>`).join('')}</ul>`;
     }
 
     async function beoordeelOpenen(makeupTestId, missedTestId) {

@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Schoolbeheer - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -96,13 +97,21 @@
       </div>
 
       <div class="tab-panel" id="panel-leerlingen">
+        <div class="card" style="margin-bottom:16px;max-width:420px;">
+          <div class="card-row"><h3>Bewaartermijn (AVG)</h3></div>
+          <p class="hint">Richtlijn voor hoe lang leerlinggegevens bewaard blijven vóórdat je overweegt ze te archiveren. Archiveren gebeurt altijd handmatig per leerling (zie hieronder) — dit getal is geen automatische verwijdering.</p>
+          <div class="field"><label for="bewaartermijn-jaren">Bewaartermijn (jaren)</label><input id="bewaartermijn-jaren" type="number" min="1" style="max-width:120px;" /></div>
+          <button class="btn btn-secondary btn-sm" id="btn-bewaartermijn-opslaan">Opslaan</button>
+        </div>
         <div class="card" style="margin-bottom:16px;">
           <div class="card-row"><h3>Leerlingen</h3><button class="btn btn-primary" id="btn-nieuw-leerling">+ Leerling</button></div>
           <p class="hint">Grote aantallen? Gebruik liever de CSV-import op <a href="/import.html">Import & koppelingen</a>.</p>
           <div class="table-wrap"><table>
-            <thead><tr><th>Naam</th><th>Nummer</th><th>Klas</th><th>Mentor</th></tr></thead>
+            <thead><tr><th>Naam</th><th>Nummer</th><th>Klas</th><th>Mentor</th><th></th></tr></thead>
             <tbody id="leerlingen-body"></tbody>
           </table></div>
+          <p class="hint" id="leerlingen-count" style="margin-top:8px;"></p>
+          <button class="btn btn-secondary btn-sm" id="btn-leerlingen-meer" hidden>Meer laden</button>
         </div>
         <div class="card">
           <div class="card-row"><h3>Ouders/verzorgers</h3><button class="btn btn-primary" id="btn-nieuw-ouder">+ Ouder/verzorger</button></div>
@@ -230,6 +239,7 @@
 <script type="module">
   import { requireUser, signOut, ROLE_LABEL, invokeFunction } from '/assets/supabase-client.js';
   import { $, $$, escapeHtml, renderTopbar, toast, setLoading, friendlyError } from '/assets/ui.js';
+  import { logAudit } from '/assets/audit.js';
 
   const MODULE_ROLLEN = ['administrator'];
   const ctx = await requireUser(MODULE_ROLLEN);
@@ -342,11 +352,17 @@
     const btn = $('#l-submit');
     setLoading(btn, true, 'Bezig…');
     try {
-      const { error } = await supabase.from('students').insert({
-        school_id: profile.school_id, full_name: $('#l-naam').value.trim(), student_number: $('#l-nummer').value.trim() || null,
+      const naam = $('#l-naam').value.trim();
+      const { data: nieuweLeerling, error } = await supabase.from('students').insert({
+        school_id: profile.school_id, full_name: naam, student_number: $('#l-nummer').value.trim() || null,
         class_id: $('#l-klas').value || null,
-      });
+      }).select('student_id').single();
       if (error) throw error;
+      await logAudit(supabase, {
+        schoolId: profile.school_id, actorProfileId: profile.id,
+        action: 'leerling.aangemaakt', entityType: 'students', entityId: nieuweLeerling?.student_id,
+        detail: { full_name: naam },
+      });
       toast('Leerling toegevoegd.', 'good');
       closeModal('#leerling-modal');
       e.target.reset();
@@ -369,6 +385,10 @@
       if (e1) throw e1;
       const { error: e2 } = await supabase.from('student_guardians').insert({ student_id: $('#o-kind').value, guardian_id: guardian.guardian_id, relation: 'ouder' });
       if (e2) throw e2;
+      await logAudit(supabase, {
+        schoolId: profile.school_id, actorProfileId: profile.id,
+        action: 'ouder.aangemaakt', entityType: 'guardians', entityId: guardian.guardian_id,
+      });
       toast('Ouder/verzorger toegevoegd.', 'good');
       closeModal('#ouder-modal');
       e.target.reset();
@@ -424,12 +444,81 @@
       : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen cursussen.</td></tr>`;
   }
 
-  async function laadLeerlingen() {
-    const { data: rows } = await supabase.from('students').select('full_name, student_number, classes(name), profiles(full_name)').order('full_name').limit(100);
-    $('#leerlingen-body').innerHTML = (rows || []).length
-      ? rows.map((r) => `<tr><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.student_number || '—')}</td><td>${escapeHtml(r.classes?.name || '—')}</td><td>${escapeHtml(r.profiles?.full_name || '—')}</td></tr>`).join('')
-      : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen leerlingen.</td></tr>`;
+  const LEERLINGEN_PAGE_SIZE = 100;
+  let leerlingenOffset = 0;
+
+  function leerlingRow(r) {
+    return `<tr>
+      <td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.student_number || '—')}</td>
+      <td>${escapeHtml(r.classes?.name || '—')}</td><td>${escapeHtml(r.profiles?.full_name || '—')}</td>
+      <td><button class="btn btn-ghost btn-sm" data-archiveer-leerling="${r.student_id}">Archiveer</button></td>
+    </tr>`;
   }
+
+  async function laadLeerlingen(meerLaden = false) {
+    if (!meerLaden) leerlingenOffset = 0;
+    const { data: rows, count } = await supabase
+      .from('students')
+      .select('student_id, full_name, student_number, classes(name), profiles(full_name)', { count: 'exact' })
+      .is('archived_at', null)
+      .order('full_name')
+      .range(leerlingenOffset, leerlingenOffset + LEERLINGEN_PAGE_SIZE - 1);
+
+    if (!meerLaden) {
+      $('#leerlingen-body').innerHTML = (rows || []).length
+        ? rows.map(leerlingRow).join('')
+        : `<tr><td colspan="5" style="color:var(--text-muted);">Nog geen leerlingen.</td></tr>`;
+    } else {
+      $('#leerlingen-body').insertAdjacentHTML('beforeend', (rows || []).map(leerlingRow).join(''));
+    }
+    leerlingenOffset += (rows || []).length;
+
+    const totaal = count ?? 0;
+    $('#leerlingen-count').textContent = totaal > 0 ? `${leerlingenOffset} van ${totaal} getoond` : '';
+    $('#btn-leerlingen-meer').hidden = leerlingenOffset >= totaal;
+
+    $$('[data-archiveer-leerling]').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!confirm('Deze leerling archiveren? De gegevens blijven bewaard, maar de leerling verdwijnt uit de reguliere lijsten.')) return;
+      try {
+        const { error } = await supabase.from('students').update({ archived_at: new Date().toISOString() }).eq('student_id', btn.dataset.archiveerLeerling);
+        if (error) throw error;
+        await logAudit(supabase, {
+          schoolId: profile.school_id, actorProfileId: profile.id,
+          action: 'leerling.gearchiveerd', entityType: 'students', entityId: btn.dataset.archiveerLeerling,
+        });
+        toast('Leerling gearchiveerd.', 'good');
+        await laadLeerlingen();
+      } catch (err) {
+        toast(friendlyError(err), 'critical');
+      }
+    }));
+  }
+  $('#btn-leerlingen-meer').addEventListener('click', () => laadLeerlingen(true));
+
+  async function laadBewaartermijn() {
+    const { data } = await supabase.from('school_settings').select('retention_years').eq('school_id', profile.school_id).maybeSingle();
+    $('#bewaartermijn-jaren').value = data?.retention_years ?? '';
+  }
+  $('#btn-bewaartermijn-opslaan').addEventListener('click', async () => {
+    const btn = $('#btn-bewaartermijn-opslaan');
+    const waarde = $('#bewaartermijn-jaren').value ? Number($('#bewaartermijn-jaren').value) : null;
+    setLoading(btn, true);
+    try {
+      const { error } = await supabase.from('school_settings').update({ retention_years: waarde }).eq('school_id', profile.school_id);
+      if (error) throw error;
+      await logAudit(supabase, {
+        schoolId: profile.school_id, actorProfileId: profile.id,
+        action: 'bewaartermijn.gewijzigd', entityType: 'school_settings', entityId: profile.school_id,
+        detail: { retention_years: waarde },
+      });
+      toast('Bewaartermijn opgeslagen.', 'good');
+    } catch (err) {
+      toast(friendlyError(err), 'critical');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+  await laadBewaartermijn();
 
   async function laadOuders() {
     const { data: rows } = await supabase.from('guardians').select('full_name, email, student_guardians(students(full_name))').order('full_name');
