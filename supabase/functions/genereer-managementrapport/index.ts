@@ -2,7 +2,9 @@
 // door de browser opgehaald via RLS - geen geheime data hier nodig) om
 // in een leesbaar managementrapport. Zelfde reden als de andere
 // genereer-*-functies: de ANTHROPIC_API_KEY moet server-side blijven.
+import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json, parseClaudeJson } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -10,6 +12,19 @@ Deno.serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return json({ error: 'Niet ingelogd.' }, 401);
+
+    // De header-aanwezigheid werd hier eerder alleen gecontroleerd, niet
+    // geverifieerd - elk niet-leeg Authorization-veld kwam er doorheen.
+    // Nu wel echt valideren via Supabase Auth vóór de (betaalde) AI-aanroep.
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `genereer-managementrapport:${user.id}`, 15, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
     const metrics = await req.json();
 

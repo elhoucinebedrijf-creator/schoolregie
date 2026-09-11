@@ -7,6 +7,7 @@
 // pas dan met de service-role precies status/signed_at/signed_name zet.
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -18,6 +19,12 @@ Deno.serve(async (req) => {
     const asUser = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { headers: { Authorization: authHeader } },
     });
+    const { data: { user } } = await asUser.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `onderteken-opp:${user.id}`, 20, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
     const { signatureId, signedName } = await req.json();
     if (!signatureId) return json({ error: 'signatureId is verplicht.' }, 400);
@@ -30,7 +37,6 @@ Deno.serve(async (req) => {
     if (!signature) return json({ error: 'Ondertekenverzoek niet gevonden of geen toegang.' }, 404);
     if (signature.status === 'akkoord') return json({ error: 'Dit is al ondertekend.' }, 400);
 
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { error } = await admin
       .from('opp_signatures')
       .update({ status: 'akkoord', signed_at: new Date().toISOString(), signed_name: signedName.trim() })

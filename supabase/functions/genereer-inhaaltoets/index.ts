@@ -8,6 +8,7 @@
 // n8n-makeup-tests-generate.
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json, parseClaudeJson } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 async function genereerInhaaltoets(input: { subject: string; level: string; learningObjectives: string; originalTestText: string; feedback?: string }) {
   const system = `Je bent een ervaren toetsontwikkelaar in het Nederlandse voortgezet onderwijs. Je maakt een gelijkwaardige inhaaltoets (zelfde niveau en moeilijkheidsgraad als de originele toets, maar andere vraagstelling zodat een leerling hem niet uit het hoofd kan overnemen) plus een bijbehorend antwoordmodel. Dit concept wordt pas gebruikt na goedkeuring door de vakdocent.
@@ -56,6 +57,14 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { headers: { Authorization: authHeader } },
     });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+
+    // AI-aanroep kost echt geld per call - op gebruiker limiteren tegen
+    // misbruik/een lus in de UI.
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `genereer-inhaaltoets:${user.id}`, 15, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
     const { missedTestId, subject, level, learningObjectives, originalTestText, feedback } = await req.json();
     if (!missedTestId) return json({ error: 'missedTestId is verplicht.' }, 400);

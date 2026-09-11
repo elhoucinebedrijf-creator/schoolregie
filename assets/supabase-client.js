@@ -19,9 +19,10 @@ export const supabase = createClient(
   { auth: { persistSession: true, autoRefreshToken: true } }
 );
 
-// De 11 rollen uit de spec. Fase 0: iedereen landt op één rolgevoelige
-// dashboard.html (geen MFA-eis - later evalueren welke rollen dat nodig
-// hebben, bv. administrator/directie).
+// De 11 rollen uit de spec.
+// MFA (TOTP) is verplicht voor administrator/directie - zie requireUser()
+// hieronder. Andere rollen kunnen 2FA optioneel instellen via profiel.html.
+const MFA_VERPLICHTE_ROLLEN = ['administrator', 'directie'];
 export const ROLE_HOME = {
   administrator: '/dashboard.html',
   directie: '/dashboard.html',
@@ -75,6 +76,32 @@ export async function requireUser(allowedRollen) {
     window.location.href = ROLE_HOME[profile.role] || '/login.html';
     return null;
   }
+
+  if (MFA_VERPLICHTE_ROLLEN.includes(profile.role)) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const isProfielPagina = window.location.pathname.endsWith('/profiel.html');
+
+    // Sessie is blijven hangen tussen wachtwoord (AAL1) en de 2FA-code
+    // (AAL2) - forceer een schone herlogin, die de MFA-stap in login.html
+    // wél afdwingt.
+    if (aal && aal.currentLevel === 'aal1' && aal.nextLevel === 'aal2') {
+      await supabase.auth.signOut();
+      window.location.href = '/login.html';
+      return null;
+    }
+
+    // Geen enkele geverifieerde factor geregistreerd - verplicht naar
+    // profiel.html om er een in te stellen, behalve als je daar al bent.
+    if (aal && aal.nextLevel === 'aal1' && !isProfielPagina) {
+      const { data: factors } = await supabase.auth.mfa.listFactors();
+      const heeftGeverifieerdeFactor = (factors?.totp ?? []).some((f) => f.status === 'verified');
+      if (!heeftGeverifieerdeFactor) {
+        window.location.href = '/profiel.html?mfa_verplicht=1';
+        return null;
+      }
+    }
+  }
+
   return { session, profile, supabase };
 }
 

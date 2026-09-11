@@ -9,6 +9,7 @@
 // Deployen: npx supabase functions deploy api --project-ref kuxagvhesctephrgfpfo --no-verify-jwt
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json, requireApiKey, parseClaudeJson } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 type Admin = ReturnType<typeof createClient>;
 
@@ -1267,6 +1268,14 @@ Deno.serve(async (req) => {
 
   const authError = requireApiKey(req);
   if (authError) return authError;
+
+  // Eén gedeelde limiet voor de hele router (niet per sub-route): dit is
+  // n8n-only verkeer, dus vooral een vangnet tegen een gelekte API-sleutel
+  // of een vastgelopen workflow die in een lus komt, niet tegen normaal
+  // gebruik.
+  const rlAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const { allowed } = await checkRateLimit(rlAdmin, 'schoolregie-api-n8n', 300, 60);
+  if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
   const url = new URL(req.url);
   const marker = '/api/n8n';

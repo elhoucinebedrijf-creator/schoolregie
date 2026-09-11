@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Verzuim - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -60,7 +61,7 @@
         </div>
 
         <div class="card" style="margin-bottom:16px;">
-          <div class="card-row"><h3>Verzuimmeldingen</h3><button class="btn btn-primary" id="btn-nieuw">+ Verzuim registreren</button></div>
+          <div class="card-row"><h3>Verzuimmeldingen</h3><span class="hint" id="events-count"></span><button class="btn btn-primary" id="btn-nieuw">+ Verzuim registreren</button></div>
           <p class="hint">Bij het bereiken van de schooldrempel wordt automatisch een interventie (of bij spijbelen: een signaal) aangemaakt.</p>
           <div class="table-wrap"><table>
             <thead><tr><th>Leerling</th><th>Type</th><th>Datum</th><th>Toelichting</th></tr></thead>
@@ -215,16 +216,21 @@
 
     await Promise.all([laadEvents(), laadInterventies()]);
 
+    const EVENTS_CAP = 200;
+
     async function laadEvents() {
-      const { data: events, error } = await supabase
+      const { data: events, error, count } = await supabase
         .from('attendance_events')
-        .select('event_id, event_type, event_date, note, students(full_name)')
+        .select('event_id, event_type, event_date, note, students(full_name)', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(EVENTS_CAP);
       if (error) { $('#events-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
       $('#events-body').innerHTML = (events || []).length
         ? events.map((ev) => `<tr><td>${escapeHtml(ev.students?.full_name || '—')}</td><td>${escapeHtml(TYPE_LABEL[ev.event_type] || ev.event_type)}</td><td>${formatDate(ev.event_date)}</td><td>${escapeHtml(ev.note || '—')}</td></tr>`).join('')
         : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen verzuim geregistreerd.</td></tr>`;
+      $('#events-count').textContent = count != null && count > (events || []).length
+        ? `toont laatste ${(events || []).length} van ${count}`
+        : '';
     }
 
     async function laadInterventies() {

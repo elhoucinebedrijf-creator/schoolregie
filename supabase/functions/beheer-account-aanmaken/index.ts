@@ -7,6 +7,7 @@
 // eigen sessie van de aanroeper, niet via de service-role).
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 const GELDIGE_ROLLEN = [
   'administrator', 'directie', 'teamleider', 'mentor', 'vakdocent',
@@ -29,11 +30,14 @@ Deno.serve(async (req) => {
     const { data: eigenProfiel } = await asUser.from('profiles').select('role, school_id').eq('id', user.id).maybeSingle();
     if (!eigenProfiel || eigenProfiel.role !== 'administrator') return json({ error: 'Alleen een administrator mag accounts aanmaken.' }, 403);
 
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `beheer-account-aanmaken:${eigenProfiel.school_id}`, 20, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
+
     const { email, fullName, role, password } = await req.json();
     if (!email || !fullName || !role) return json({ error: 'email, fullName en role zijn verplicht.' }, 400);
     if (!GELDIGE_ROLLEN.includes(role)) return json({ error: `Onbekende rol: ${role}` }, 400);
 
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const wachtwoord = password || crypto.randomUUID().slice(0, 12);
 
     const authRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/admin/users`, {
@@ -53,6 +57,15 @@ Deno.serve(async (req) => {
       });
       throw profileError;
     }
+
+    await asUser.from('audit_logs').insert({
+      school_id: eigenProfiel.school_id,
+      actor_profile_id: user.id,
+      action: 'account.aangemaakt',
+      entity_type: 'profiles',
+      entity_id: authData.id,
+      detail: { email, role },
+    });
 
     return json({ ok: true, profileId: authData.id, email, password: password ? null : wachtwoord });
   } catch (err) {

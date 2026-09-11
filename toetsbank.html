@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Toetsbank - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -49,7 +50,7 @@
 
     <div class="content">
       <div class="card">
-        <div class="card-row"><h3>Documenten</h3><button class="btn btn-primary" id="btn-nieuw" hidden>+ Document toevoegen</button></div>
+        <div class="card-row"><h3>Documenten</h3><span class="hint" id="docs-count"></span><button class="btn btn-primary" id="btn-nieuw" hidden>+ Document toevoegen</button></div>
         <p class="hint" id="toetsbank-hint">Originele toetsen en antwoordmodellen die je hier toevoegt staan direct als goedgekeurd - AI-varianten uit de inhaaltoets-flow (Gemiste toetsen) wachten altijd eerst op beoordeling door de vakdocent.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Toets</th><th>Type</th><th>Status</th><th>Inhoud</th></tr></thead>
@@ -156,12 +157,14 @@
 
   await laadDocumenten();
 
+  const DOCS_CAP = 200;
+
   async function laadDocumenten() {
-    const { data: docs, error } = await supabase
+    const { data: docs, error, count } = await supabase
       .from('test_documents')
-      .select('document_id, kind, status, content, tests(title)')
+      .select('document_id, kind, status, content, tests(title)', { count: 'exact' })
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(DOCS_CAP);
     if (error) { $('#docs-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
     $('#docs-body').innerHTML = (docs || []).length
       ? docs.map((d) => `<tr>
@@ -171,6 +174,9 @@
           <td><button class="btn btn-sm btn-secondary" data-bekijk="${d.document_id}">Bekijk</button></td>
         </tr>`).join('')
       : `<tr><td colspan="4" style="color:var(--text-muted);">Nog geen documenten.</td></tr>`;
+    $('#docs-count').textContent = count != null && count > (docs || []).length
+      ? `toont laatste ${(docs || []).length} van ${count}`
+      : '';
 
     $$('[data-bekijk]').forEach((btn) => btn.addEventListener('click', async () => {
       const { data: doc } = await supabase.from('test_documents').select('content, kind, tests(title)').eq('document_id', btn.dataset.bekijk).maybeSingle();

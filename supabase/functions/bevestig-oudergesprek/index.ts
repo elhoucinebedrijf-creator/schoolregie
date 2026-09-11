@@ -7,6 +7,7 @@
 // pas dan met de service-role precies één kolom zet.
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -19,6 +20,12 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { data: { user } } = await asUser.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+    const { allowed } = await checkRateLimit(admin, `bevestig-oudergesprek:${user.id}`, 20, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
+
     const { conversationId } = await req.json();
     if (!conversationId) return json({ error: 'conversationId is verplicht.' }, 400);
 
@@ -29,7 +36,6 @@ Deno.serve(async (req) => {
     if (!conversation) return json({ error: 'Gesprek niet gevonden of geen toegang.' }, 404);
     if (!conversation.scheduled_at) return json({ error: 'Er is nog geen datum/tijd voorgesteld om te bevestigen.' }, 400);
 
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { error } = await admin.from('conversations').update({ confirmed_by_guardian: true }).eq('conversation_id', conversationId);
     if (error) throw error;
 

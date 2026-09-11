@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mijn profiel - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -56,6 +57,9 @@
 
       <div class="card" style="max-width:520px;">
         <div class="card-row"><h3>Tweestapsverificatie (2FA)</h3></div>
+        <p class="hint" id="mfa-verplicht-banner" hidden style="color:var(--warn,#a87519);font-weight:600;">
+          2FA is verplicht voor jouw rol — stel het hieronder in om verder te kunnen.
+        </p>
         <p class="hint" id="mfa-status">Bezig met laden…</p>
 
         <div id="mfa-off">
@@ -91,6 +95,10 @@
 
   renderTopbar(profile, ROLE_LABEL[profile.role] || profile.role, signOut);
   $('#sidebar-rol').textContent = ROLE_LABEL[profile.role] || profile.role;
+
+  if (new URLSearchParams(window.location.search).get('mfa_verplicht') === '1') {
+    $('#mfa-verplicht-banner').hidden = false;
+  }
 
   $('#p-naam').textContent = profile.full_name;
   $('#p-email').textContent = profile.email;

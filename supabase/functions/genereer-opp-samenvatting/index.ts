@@ -7,6 +7,7 @@
 // hier UITSLUITEND een concept-samenvatting, nooit het besluit.
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json, parseClaudeJson } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -18,6 +19,12 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { headers: { Authorization: authHeader } },
     });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `genereer-opp-samenvatting:${user.id}`, 15, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
     const { oppId, include } = await req.json();
     if (!oppId) return json({ error: 'oppId is verplicht.' }, 400);

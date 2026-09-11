@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Rooster & capaciteit - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -70,7 +71,7 @@
       </div>
 
       <div class="card" style="margin-bottom:16px;">
-        <div class="card-row"><h3>Inhaalmomenten (toetsen)</h3><button class="btn btn-primary" id="btn-nieuw-makeup">+ Los moment toevoegen</button></div>
+        <div class="card-row"><h3>Inhaalmomenten (toetsen)</h3><span class="hint" id="makeup-slots-count"></span><button class="btn btn-primary" id="btn-nieuw-makeup">+ Los moment toevoegen</button></div>
         <p class="hint">"Scheduling/find-slot" (n8n) en de "Inplannen"-knop op Gemiste toetsen kiezen automatisch het eerstvolgende moment met vrije capaciteit.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Datum/tijd</th><th>Lokaal</th><th>Surveillant</th><th>Bezet</th></tr></thead>
@@ -79,7 +80,7 @@
       </div>
 
       <div class="card">
-        <div class="card-row"><h3>Maatwerkmomenten</h3><button class="btn btn-primary" id="btn-nieuw-maatwerk">+ Los moment toevoegen</button></div>
+        <div class="card-row"><h3>Maatwerkmomenten</h3><span class="hint" id="maatwerk-slots-count"></span><button class="btn btn-primary" id="btn-nieuw-maatwerk">+ Los moment toevoegen</button></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Datum/tijd</th><th>Vak</th><th>Docent</th><th>Bezet</th></tr></thead>
           <tbody id="maatwerk-slots-body"><tr><td colspan="4" style="color:var(--text-muted);">Bezig met laden…</td></tr></tbody>
@@ -389,13 +390,15 @@
     await Promise.all([laadMakeupSlots(), laadMaatwerkSlots()]);
   }
 
+  const SLOTS_CAP = 100;
+
   async function laadMakeupSlots() {
-    const { data: slots, error } = await supabase
+    const { data: slots, error, count } = await supabase
       .from('makeup_slots')
-      .select('makeup_slot_id, starts_at, location, capacity, profiles(full_name), makeup_tests(makeup_test_id)')
+      .select('makeup_slot_id, starts_at, location, capacity, profiles(full_name), makeup_tests(makeup_test_id)', { count: 'exact' })
       .gte('starts_at', new Date().toISOString())
       .order('starts_at', { ascending: true })
-      .limit(30);
+      .limit(SLOTS_CAP);
     if (error) { $('#makeup-slots-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
     $('#makeup-slots-body').innerHTML = (slots || []).length
       ? slots.map((s) => `<tr>
@@ -405,15 +408,18 @@
           <td>${(s.makeup_tests || []).length} / ${s.capacity}</td>
         </tr>`).join('')
       : `<tr><td colspan="4" style="color:var(--text-muted);">Geen aankomende inhaalmomenten.</td></tr>`;
+    $('#makeup-slots-count').textContent = count != null && count > (slots || []).length
+      ? `toont eerstkomende ${(slots || []).length} van ${count}`
+      : '';
   }
 
   async function laadMaatwerkSlots() {
-    const { data: slots, error } = await supabase
+    const { data: slots, error, count } = await supabase
       .from('maatwerk_slots')
-      .select('maatwerk_slot_id, starts_at, capacity, subjects(name), profiles(full_name), maatwerk_assignments(assignment_id)')
+      .select('maatwerk_slot_id, starts_at, capacity, subjects(name), profiles(full_name), maatwerk_assignments(assignment_id)', { count: 'exact' })
       .gte('starts_at', new Date().toISOString())
       .order('starts_at', { ascending: true })
-      .limit(30);
+      .limit(SLOTS_CAP);
     if (error) { $('#maatwerk-slots-body').innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">${escapeHtml(friendlyError(error))}</td></tr>`; return; }
     $('#maatwerk-slots-body').innerHTML = (slots || []).length
       ? slots.map((s) => `<tr>
@@ -423,6 +429,9 @@
           <td>${(s.maatwerk_assignments || []).length} / ${s.capacity}</td>
         </tr>`).join('')
       : `<tr><td colspan="4" style="color:var(--text-muted);">Geen aankomende maatwerkmomenten.</td></tr>`;
+    $('#maatwerk-slots-count').textContent = count != null && count > (slots || []).length
+      ? `toont eerstkomende ${(slots || []).length} van ${count}`
+      : '';
   }
 </script>
 </body>

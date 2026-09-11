@@ -10,6 +10,7 @@
 // voert de echte wijziging door en maakt het token meteen ongeldig.
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json } from '../_shared/api.ts';
+import { checkRateLimit, clientIp } from '../_shared/rate-limit.ts';
 
 type Admin = ReturnType<typeof createClient>;
 
@@ -46,6 +47,11 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+  // Publiek, niet-ingelogd endpoint (klikt een link in een e-mail) - op IP
+  // limiteren tegen het brute-forcen van tokens of misbruik van de link.
+  const { allowed } = await checkRateLimit(admin, `openbare-bevestiging:${clientIp(req)}`, 30, 60);
+  if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
   try {
     if (req.method === 'GET') {

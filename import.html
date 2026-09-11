@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Import & koppelingen - SchoolRegie</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -113,18 +114,56 @@
     ouders: { studentNumber: ['leerlingnummer', 'studentnummer', 'nummer'], fullName: ['naam', 'ouder', 'volledige naam'], email: ['email', 'e-mail', 'e-mailadres'], phone: ['telefoon', 'telefoonnummer'], relation: ['relatie', 'rol'] },
   };
 
+  // Detecteert het scheidingsteken (komma/puntkomma/tab) i.p.v. altijd op
+  // [;,] te splitsen, en ondersteunt aangehaalde velden ("Jansen, Piet" of
+  // "hij zei ""hallo""") correct - de vorige versie brak op elke komma/
+  // puntkomma binnen een veld, ook als die tussen aanhalingstekens stond.
+  function detecteerScheidingsteken(headerLine) {
+    const kandidaten = [',', ';', '\t'];
+    let beste = ',', besteAantal = -1;
+    for (const c of kandidaten) {
+      const aantal = headerLine.split(c).length;
+      if (aantal > besteAantal) { beste = c; besteAantal = aantal; }
+    }
+    return beste;
+  }
+
+  function parseLine(line, delimiter) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (inQuotes) {
+        if (char === '"') {
+          if (line[i + 1] === '"') { current += '"'; i++; }
+          else { inQuotes = false; }
+        } else { current += char; }
+      } else if (char === '"') {
+        inQuotes = true;
+      } else if (char === delimiter) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  }
+
   function parseCsv(text) {
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
-    if (!lines.length) return { headers: [], rows: [] };
-    const splitLine = (line) => line.split(/[;,]/).map((c) => c.trim().replace(/^"|"$/g, ''));
-    const headers = splitLine(lines[0]);
+    if (!lines.length) return { headers: [], rows: [], delimiter: ',' };
+    const delimiter = detecteerScheidingsteken(lines[0]);
+    const headers = parseLine(lines[0], delimiter);
     const rows = lines.slice(1).map((line) => {
-      const cells = splitLine(line);
+      const cells = parseLine(line, delimiter);
       const obj = {};
       headers.forEach((h, i) => { obj[h] = cells[i] ?? ''; });
       return obj;
     });
-    return { headers, rows };
+    return { headers, rows, delimiter };
   }
 
   function matchAlias(headers, aliases) {
@@ -136,16 +175,19 @@
     return null;
   }
 
+  const PREVIEW_RIJEN = 20;
   let huidigeRows = [];
   let huidigeHeaders = [];
+  let huidigDelimiter = ',';
 
   $('#i-file').addEventListener('change', async () => {
     const file = $('#i-file').files[0];
     if (!file) return;
     const text = await file.text();
-    const { headers, rows } = parseCsv(text);
+    const { headers, rows, delimiter } = parseCsv(text);
     huidigeRows = rows;
     huidigeHeaders = headers;
+    huidigDelimiter = delimiter;
     renderPreview();
   });
   $('#i-kind').addEventListener('change', renderPreview);
@@ -153,15 +195,16 @@
   function renderPreview() {
     const kind = $('#i-kind').value;
     const verwerkbaar = VERWERKBARE_TYPES.includes(kind);
+    const scheidingslabel = huidigDelimiter === '\t' ? 'tab' : huidigDelimiter;
     $('#i-hint').textContent = verwerkbaar
-      ? 'Dit type wordt automatisch verwerkt en direct in de database bijgewerkt.'
+      ? `Dit type wordt automatisch verwerkt en direct in de database bijgewerkt. Scheidingsteken herkend: "${scheidingslabel}".`
       : 'Dit type wordt nog niet automatisch verwerkt - het bestand wordt alleen geregistreerd in de importgeschiedenis.';
     $('#btn-importeren').disabled = !huidigeRows.length;
 
     if (!huidigeHeaders.length) { $('#preview-head').innerHTML = ''; $('#preview-body').innerHTML = ''; return; }
     $('#preview-head').innerHTML = `<tr>${huidigeHeaders.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
-    $('#preview-body').innerHTML = huidigeRows.slice(0, 5).map((r) => `<tr>${huidigeHeaders.map((h) => `<td>${escapeHtml(r[h])}</td>`).join('')}</tr>`).join('')
-      + (huidigeRows.length > 5 ? `<tr><td colspan="${huidigeHeaders.length}" style="color:var(--text-muted);">… en ${huidigeRows.length - 5} meer</td></tr>` : '');
+    $('#preview-body').innerHTML = huidigeRows.slice(0, PREVIEW_RIJEN).map((r) => `<tr>${huidigeHeaders.map((h) => `<td>${escapeHtml(r[h])}</td>`).join('')}</tr>`).join('')
+      + (huidigeRows.length > PREVIEW_RIJEN ? `<tr><td colspan="${huidigeHeaders.length}" style="color:var(--text-muted);">… en ${huidigeRows.length - PREVIEW_RIJEN} meer (totaal ${huidigeRows.length} rijen)</td></tr>` : '');
   }
 
   $('#btn-importeren').addEventListener('click', async () => {

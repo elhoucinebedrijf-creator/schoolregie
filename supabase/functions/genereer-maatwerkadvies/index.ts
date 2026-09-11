@@ -6,6 +6,7 @@
 // (zelfde patroon als genereer-inhaaltoets in Fase 1).
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 import { corsHeaders, json, parseClaudeJson } from '../_shared/api.ts';
+import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 async function genereerAdviesMetClaude(input: { studentName: string; period: string; grades: unknown; attendanceSummary: unknown }) {
   const system = `Je bent een ervaren mentor-adviseur in het Nederlandse voortgezet onderwijs. Op basis van cijfers (en eventueel verzuim) van een leerling beoordeel je per vak of maatwerkbegeleiding (bijles/extra oefening) nodig is. Dit is een ADVIES - een mentor bevestigt dit altijd voordat een leerling daadwerkelijk wordt ingepland.
@@ -35,6 +36,12 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { headers: { Authorization: authHeader } },
     });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return json({ error: 'Niet ingelogd.' }, 401);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { allowed } = await checkRateLimit(admin, `genereer-maatwerkadvies:${user.id}`, 15, 60);
+    if (!allowed) return json({ error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' }, 429);
 
     const { studentId, period, grades, attendanceSummary } = await req.json();
     if (!studentId) return json({ error: 'studentId is verplicht.' }, 400);
